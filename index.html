@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cadastro de Vaga e Avaliação de Currículos</title>
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- PDF.js (para extrair texto dos PDFs) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+
+  <!-- Chart.js (para desenhar o gráfico de barras horizontais) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>Cadastro de Vaga e Avaliação de Currículos</h1>
+
+  <!-- Formulário para cadastrar a vaga -->
+  <section id="job-registration">
+    <label for="job-title">Título da Vaga (opcional):</label>
+    <input type="text" id="job-title" placeholder="Ex.: Vendedor Externo" />
+
+    <label for="job-desc">Descrição da Vaga (opcional):</label>
+    <textarea id="job-desc" placeholder="Cole aqui a descrição completa da vaga: responsabilidades, requisitos, qualificações, etc."></textarea>
+  </section>
+
+  <!-- Seção para seleção de currículos -->
+  <section id="cv-selection">
+    <label for="file-input">Selecione arquivos PDF ou pasta de currículos:</label>
+    <input type="file" id="file-input" accept=".pdf" multiple webkitdirectory directory />
+
+    <!-- Número de tentativas (1 a 10) -->
+    <label for="retry-count">Número de tentativas para processar cada PDF (1–10):</label>
+    <select id="retry-count">
+      <option value="1" selected>1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+      <option value="7">7</option>
+      <option value="8">8</option>
+      <option value="9">9</option>
+      <option value="10">10</option>
+    </select>
+  </section>
+
+  <button id="process-btn" disabled>Processar Currículos</button>
+  <span id="loader">⏳ Processando...</span>
+
+  <!-- Botão para extrair dados para a planilha -->
+  <button id="extract-btn" disabled>Extrair Dados para Planilha</button>
+  <span id="extract-loader">⏳ Extraindo...</span>
+
+  <div id="usage-info"></div>
+  <div id="output" placeholder="Aqui aparecerão os resultados"></div>
+
+  <!-- Contêiner para o gráfico de barras horizontais (se houver avaliação) -->
+  <div id="chart-container" style="display: none;">
+    <h2>Gráfico de Pontuação por Candidato</h2>
+    <canvas id="scoreChart"></canvas>
+  </div>
+
+  <!-- Nosso código principal -->
+  <script src="app.js"></script>
+</body>
+</html>
