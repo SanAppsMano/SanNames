@@ -8,12 +8,35 @@ body { font-family: Arial, sans-serif; padding: 16px; }
 h2 { margin-bottom: 10px; }
 label { display: block; margin-bottom: 6px; }
 input[type=date] { padding: 4px; margin-right: 10px; }
-button { padding: 5px 10px; font-size: 13px; margin-right: 6px; }
+button { padding: 5px 10px; font-size: 13px; margin-right: 6px; cursor: pointer; }
 
 table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
 th, td { border: 1px solid #ccc; padding: 6px; }
-th { background: #f2f2f2; cursor: pointer; }
+th { background: #f2f2f2; cursor: pointer; white-space: nowrap; }
 tr.novo td { background: #d8ffd8; }
+
+th.sortable::after {
+  content: " ⇅";
+  font-size: 10px;
+  color: #666;
+}
+th.sorted-asc::after {
+  content: " ↑";
+}
+th.sorted-desc::after {
+  content: " ↓";
+}
+
+thead tr.filter-row th {
+  background: #fafafa;
+  cursor: default;
+}
+thead tr.filter-row input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  padding: 2px 4px;
+}
 
 #historico { margin-top: 20px; font-size: 13px; background: #fafafa; padding: 10px; border: 1px solid #ddd; max-width: 480px; }
 #armazenamento { margin-top: 16px; font-size: 13px; background: #fdfdfd; padding: 10px; border: 1px solid #ddd; max-width: 480px; }
@@ -48,15 +71,27 @@ Data final:
 
 <table>
 <thead>
-<tr>
-<th>CNS</th>
-<th>Nome</th>
-<th>Idade</th>
-<th>Nasc</th>
-<th>Primeiro agendamento</th>
-<th>Último agendamento</th>
-<th>Exames</th>
-<th>Novo</th>
+<tr class="header-row">
+  <th class="sortable" data-col="cns">CNS</th>
+  <th class="sortable" data-col="nome">Nome</th>
+  <th class="sortable" data-col="idade">Idade</th>
+  <th class="sortable" data-col="nasc">Nasc</th>
+  <th class="sortable" data-col="prim">Primeiro agendamento</th>
+  <th class="sortable" data-col="ult">Último agendamento</th>
+  <th class="sortable" data-col="dias">Dias agendado</th>
+  <th class="sortable" data-col="exames">Exames</th>
+  <th class="sortable" data-col="novo">Novo</th>
+</tr>
+<tr class="filter-row">
+  <th><input id="fCns" placeholder="filtrar"></th>
+  <th><input id="fNome" placeholder="filtrar"></th>
+  <th><input id="fIdade" placeholder="filtrar"></th>
+  <th><input id="fNasc" placeholder="filtrar"></th>
+  <th><input id="fPrim" placeholder="filtrar"></th>
+  <th><input id="fUlt" placeholder="filtrar"></th>
+  <th><input id="fDias" placeholder="filtrar"></th>
+  <th><input id="fExames" placeholder="filtrar"></th>
+  <th><input id="fNovo" placeholder="sim/não"></th>
 </tr>
 </thead>
 <tbody id="tb"></tbody>
@@ -77,8 +112,8 @@ Data final:
 </div>
 <small>
 Chaves usadas:<br>
-<b>historicoChaves</b> = lista dos pares CNS + data de agendamento já vistos<br>
-<b>historicoIntervalos</b> = lista dos intervalos que você aplicou na tela
+<b>historicoChaves</b> = pares CNS + data de agendamento já vistos<br>
+<b>historicoIntervalos</b> = intervalos que você aplicou na tela
 </small>
 </div>
 
@@ -86,6 +121,10 @@ Chaves usadas:<br>
 let registros = [];
 let historicoChaves = JSON.parse(localStorage.getItem("historicoChaves")||"{}");
 let historicoIntervalos = JSON.parse(localStorage.getItem("historicoIntervalos")||"[]");
+
+// linhas agregadas por CNS no intervalo atual
+let linhasBase = [];
+let currentSort = { col: "cns", dir: "asc" };
 
 function toSortDate(s){
   if(!s) return "";
@@ -152,6 +191,7 @@ document.getElementById("aplicar").addEventListener("click",()=>{
 
   let tb=document.getElementById("tb");
   tb.innerHTML="";
+  linhasBase = [];
 
   let fIni=ini;
   let fFim=fim;
@@ -169,6 +209,7 @@ document.getElementById("aplicar").addEventListener("click",()=>{
         min:r.agSort,
         max:r.agSort,
         exames:1,
+        dias:new Set([r.agSort]),
         novo:false
       };
     }else{
@@ -176,6 +217,7 @@ document.getElementById("aplicar").addEventListener("click",()=>{
       o.exames++;
       if(r.agSort<o.min) o.min=r.agSort;
       if(r.agSort>o.max) o.max=r.agSort;
+      o.dias.add(r.agSort);
     }
   }
 
@@ -189,26 +231,17 @@ document.getElementById("aplicar").addEventListener("click",()=>{
     }
   }
 
-  for(let k in mapa){
-    let o=mapa[k];
-    let tr=document.createElement("tr");
-    if(o.novo) tr.classList.add("novo");
-
-    let nomeExib = o.nome;
-    if(o.idade>=60) nomeExib = nomeExib + "*";
-
-    tr.innerHTML =
-      "<td>"+o.cns+"</td>"+
-      "<td>"+nomeExib+"</td>"+
-      "<td>"+(o.idade||"")+"</td>"+
-      "<td>"+o.nasc+"</td>"+
-      "<td>"+toHuman(o.min)+"</td>"+
-      "<td>"+toHuman(o.max)+"</td>"+
-      "<td>"+o.exames+"</td>"+
-      "<td>"+(o.novo?"Sim":"")+"</td>";
-
-    tb.appendChild(tr);
-  }
+  linhasBase = Object.values(mapa).map(o => ({
+    cns: o.cns,
+    nome: o.nome,
+    nasc: o.nasc,
+    idade: o.idade,
+    min: o.min,
+    max: o.max,
+    dias: o.dias.size,
+    exames: o.exames,
+    novo: o.novo
+  }));
 
   for(let r of filtrado){
     historicoChaves[r.chave]=true;
@@ -228,7 +261,93 @@ document.getElementById("aplicar").addEventListener("click",()=>{
 
   document.getElementById("copiarPeriodo").disabled=false;
   document.getElementById("copiarNovos").disabled=false;
+
+  currentSort = { col: "cns", dir: "asc" };
+  renderTabela();
 });
+
+function renderTabela(){
+  let tb=document.getElementById("tb");
+  tb.innerHTML="";
+
+  document.querySelectorAll(".header-row th").forEach(th=>{
+    th.classList.remove("sorted-asc","sorted-desc");
+  });
+  let ativo=document.querySelector('.header-row th[data-col="'+currentSort.col+'"]');
+  if(ativo){
+    ativo.classList.add(currentSort.dir==="asc"?"sorted-asc":"sorted-desc");
+  }
+
+  let fCns=document.getElementById("fCns").value.toLowerCase().trim();
+  let fNome=document.getElementById("fNome").value.toLowerCase().trim();
+  let fIdade=document.getElementById("fIdade").value.toLowerCase().trim();
+  let fNasc=document.getElementById("fNasc").value.toLowerCase().trim();
+  let fPrim=document.getElementById("fPrim").value.toLowerCase().trim();
+  let fUlt=document.getElementById("fUlt").value.toLowerCase().trim();
+  let fDias=document.getElementById("fDias").value.toLowerCase().trim();
+  let fExames=document.getElementById("fExames").value.toLowerCase().trim();
+  let fNovo=document.getElementById("fNovo").value.toLowerCase().trim();
+
+  let filtradas = linhasBase.filter(o=>{
+    if(fCns && !o.cns.toLowerCase().includes(fCns)) return false;
+    let nomeExib = o.nome;
+    if(o.idade>=60) nomeExib = nomeExib + "*";
+    if(fNome && !nomeExib.toLowerCase().includes(fNome)) return false;
+    if(fIdade && (o.idade===null || !String(o.idade).includes(fIdade))) return false;
+    if(fNasc && !(o.nasc||"").toLowerCase().includes(fNasc)) return false;
+    if(fPrim && !toHuman(o.min).toLowerCase().includes(fPrim)) return false;
+    if(fUlt && !toHuman(o.max).toLowerCase().includes(fUlt)) return false;
+    if(fDias && !String(o.dias).includes(fDias)) return false;
+    if(fExames && !String(o.exames).includes(fExames)) return false;
+    if(fNovo){
+      let alvo = fNovo.startsWith("s") ? "sim" : fNovo;
+      let ehNovo = o.novo ? "sim" : "nao";
+      if(!ehNovo.includes(alvo)) return false;
+    }
+    return true;
+  });
+
+  let dir = currentSort.dir==="asc"?1:-1;
+  filtradas.sort((a,b)=>{
+    let va, vb;
+    switch(currentSort.col){
+      case "cns": va=a.cns; vb=b.cns; break;
+      case "nome": va=a.nome.toLowerCase(); vb=b.nome.toLowerCase(); break;
+      case "idade": va=a.idade===null?-9999:a.idade; vb=b.idade===null?-9999:b.idade; break;
+      case "nasc": va=(a.nasc||""); vb=(b.nasc||""); break;
+      case "prim": va=a.min||""; vb=b.min||""; break;
+      case "ult": va=a.max||""; vb=b.max||""; break;
+      case "dias": va=a.dias; vb=b.dias; break;
+      case "exames": va=a.exames; vb=b.exames; break;
+      case "novo": va=a.novo?1:0; vb=b.novo?1:0; break;
+      default: va=""; vb="";
+    }
+    if(va<vb) return -1*dir;
+    if(va>vb) return 1*dir;
+    return 0;
+  });
+
+  for(let o of filtradas){
+    let tr=document.createElement("tr");
+    if(o.novo) tr.classList.add("novo");
+
+    let nomeExib = o.nome;
+    if(o.idade>=60) nomeExib = nomeExib + "*";
+
+    tr.innerHTML =
+      "<td>"+o.cns+"</td>"+
+      "<td>"+nomeExib+"</td>"+
+      "<td>"+(o.idade||"")+"</td>"+
+      "<td>"+(o.nasc||"")+"</td>"+
+      "<td>"+toHuman(o.min)+"</td>"+
+      "<td>"+toHuman(o.max)+"</td>"+
+      "<td>"+o.dias+"</td>"+
+      "<td>"+o.exames+"</td>"+
+      "<td>"+(o.novo?"Sim":"")+"</td>";
+
+    tb.appendChild(tr);
+  }
+}
 
 function renderHistorico(){
   let h=document.getElementById("hist");
@@ -240,8 +359,6 @@ function renderHistorico(){
   }
 }
 
-/* Mostrador de armazenamento */
-
 function calcLocalStorageUso(){
   let totalBytes = 0;
   let detalhes = [];
@@ -249,7 +366,7 @@ function calcLocalStorageUso(){
   for(let i=0;i<localStorage.length;i++){
     let k = localStorage.key(i);
     let v = localStorage.getItem(k) || "";
-    let bytes = (k.length + v.length) * 2; // aprox 2 bytes por caractere
+    let bytes = (k.length + v.length) * 2;
     totalBytes += bytes;
 
     if(k === "historicoChaves"){
@@ -289,9 +406,8 @@ function renderArmazenamento(){
       "\nTotal aproximado: "+uso.totalMB.toFixed(2)+" MB";
   }
 
-  let limiteMB = 5;          // valor típico por navegador
-  let alertaMB = 4;          // limite de alerta
-  let criticoMB = 4.5;       // limite crítico
+  let alertaMB = 4;
+  let criticoMB = 4.5;
 
   if(uso.totalMB === 0){
     avisoEl.textContent = "Armazenamento vazio.";
@@ -303,7 +419,7 @@ function renderArmazenamento(){
     avisoEl.textContent = "Atenção: uso de armazenamento está alto. Considere limpar o histórico em breve.";
     avisoEl.classList.add("alerta");
   }else{
-    avisoEl.textContent = "Quase no limite estimado do navegador. Sugestão forte: limpar histórico para evitar erro de espaço.";
+    avisoEl.textContent = "Quase no limite estimado do navegador. Sugestão: limpar histórico para evitar erro de espaço.";
     avisoEl.classList.add("critico");
   }
 }
@@ -331,8 +447,6 @@ document.getElementById("copiarNovos").addEventListener("click",()=>{
   alert("Novos copiados");
 });
 
-/* Botões do painel de armazenamento */
-
 document.getElementById("btAtualizarArma").addEventListener("click",()=>{
   renderArmazenamento();
   alert("Informações de armazenamento atualizadas.");
@@ -350,6 +464,27 @@ document.getElementById("btLimparHistorico").addEventListener("click",()=>{
   renderHistorico();
   renderArmazenamento();
   alert("Histórico e chaves limpos.");
+});
+
+// filtros
+["fCns","fNome","fIdade","fNasc","fPrim","fUlt","fDias","fExames","fNovo"].forEach(id=>{
+  document.getElementById(id).addEventListener("input",()=>{
+    renderTabela();
+  });
+});
+
+// clique para ordenar
+document.querySelectorAll(".header-row th.sortable").forEach(th=>{
+  th.addEventListener("click",()=>{
+    let col=th.getAttribute("data-col");
+    if(currentSort.col===col){
+      currentSort.dir = currentSort.dir==="asc"?"desc":"asc";
+    }else{
+      currentSort.col=col;
+      currentSort.dir="asc";
+    }
+    renderTabela();
+  });
 });
 </script>
 
