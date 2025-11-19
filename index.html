@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Lista única de pacientes por CNS</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+    label {
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #444;
+    }
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 4px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 16px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    th {
+      background: #f2f2f2;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    th.sortable::after {
+      content: " \21C5";
+      font-size: 10px;
+      color: #666;
+    }
+    th.sorted-asc::after {
+      content: " \2191";
+    }
+    th.sorted-desc::after {
+      content: " \2193";
+    }
+    thead tr.filter-row th {
+      background: #fafafa;
+      cursor: default;
+    }
+    thead tr.filter-row input {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 12px;
+      padding: 2px 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Lista única por CNS</h1>
+
+  <label>
+    Selecione o arquivo CSV:
+    <input type="file" id="fileInput" accept=".csv,.txt">
+  </label>
+
+  <div id="status">Nenhum arquivo carregado.</div>
+
+  <div class="actions">
+    <button id="copyNamesBtn" disabled>Copiar nomes</button>
+    <button id="copyFixedNamesBtn" disabled>Copiar nomes corrigidos</button>
+    <button id="fixNamesBtn" disabled>Corrigir nomes com IA (Groq)</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr class="header-row">
+        <th class="sortable" data-sort="cns">CNS</th>
+        <th class="sortable" data-sort="name">Nome</th>
+        <th class="sortable" data-sort="nameFixed">Nome Corrigido (IA)</th>
+        <th class="sortable" data-sort="age">Idade</th>
+        <th class="sortable" data-sort="dob">Dt nasc.</th>
+        <th class="sortable" data-sort="schedule">Dt agendamento</th>
+        <th class="sortable" data-sort="exams">Qtde exames</th>
+      </tr>
+      <tr class="filter-row">
+        <th><input id="filterCns" placeholder="filtrar CNS"></th>
+        <th><input id="filterName" placeholder="filtrar nome"></th>
+        <th><input id="filterNameFixed" placeholder="filtrar nome corrigido"></th>
+        <th><input id="filterAge" placeholder="filtrar idade"></th>
+        <th><input id="filterDob" placeholder="filtrar dt nasc."></th>
+        <th><input id="filterSchedule" placeholder="filtrar dt ag."></th>
+        <th><input id="filterExams" placeholder="filtrar qtde"></th>
+      </tr>
+    </thead>
+    <tbody id="resultBody"></tbody>
+  </table>
+
+  <script>
+    const elderlyAge = 60;
+    const GROQ_FUNCTION = "/.netlify/functions/groq-fixnames";
+
+    const fileInput = document.getElementById("fileInput");
+    const statusEl = document.getElementById("status");
+    const resultBody = document.getElementById("resultBody");
+    const copyNamesBtn = document.getElementById("copyNamesBtn");
+    const copyFixedNamesBtn = document.getElementById("copyFixedNamesBtn");
+    const fixNamesBtn = document.getElementById("fixNamesBtn");
+
+    const filterCns = document.getElementById("filterCns");
+    const filterName = document.getElementById("filterName");
+    const filterNameFixed = document.getElementById("filterNameFixed");
+    const filterAge = document.getElementById("filterAge");
+    const filterDob = document.getElementById("filterDob");
+    const filterSchedule = document.getElementById("filterSchedule");
+    const filterExams = document.getElementById("filterExams");
+
+    let allRows = [];
+    let currentRows = [];
+    let currentSort = { column: "schedule", dir: "asc" };
+
+    fileInput.addEventListener("change", handleFile, false);
+    copyNamesBtn.addEventListener("click", () => copyNames(false));
+    copyFixedNamesBtn.addEventListener("click", () => copyNames(true));
+    fixNamesBtn.addEventListener("click", handleFixNamesIA);
+
+    [filterCns, filterName, filterNameFixed, filterAge, filterDob, filterSchedule, filterExams].forEach(input => {
+      input.addEventListener("input", () => renderTable());
+    });
+
+    document.querySelectorAll("thead .header-row th.sortable").forEach(th => {
+      th.addEventListener("click", () => {
+        const col = th.getAttribute("data-sort");
+        if (currentSort.column === col) {
+          currentSort.dir = currentSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          currentSort.column = col;
+          currentSort.dir = "asc";
+        }
+        renderTable();
+      });
+    });
+
+    function handleFile(evt) {
+      const file = evt.target.files[0];
+      if (!file) {
+        statusEl.textContent = "Nenhum arquivo selecionado.";
+        return;
+      }
+
+      statusEl.textContent = "Lendo arquivo...";
+      const reader = new FileReader();
+      reader.readAsText(file, "ISO-8859-1");
+
+      reader.onload = function (e) {
+        const text = e.target.result;
+        processCsv(text);
+      };
+
+      reader.onerror = function () {
+        statusEl.textContent = "Erro ao ler o arquivo.";
+      };
+    }
+
+    function toTitleCase(str) {
+      return str
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
+
+    function parseDateToSortKey(raw) {
+      if (!raw) return "";
+      const cleaned = raw.replace(/-/g, ".").replace(/\//g, ".");
+      const parts = cleaned.split(".");
+      if (parts.length !== 3) return "";
+      let [d, m, y] = parts;
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+      if (y.length === 2) {
+        y = "20" + y;
+      }
+      return y + "-" + m + "-" + d;
+    }
+
+    function formatDob(dobRaw) {
+      if (!dobRaw) return "";
+      const cleaned = dobRaw.replace(/-/g, ".").replace(/\//g, ".");
+      const parts = cleaned.split(".");
+      if (parts.length !== 3) return "";
+      let [d, m, y] = parts;
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+      if (y.length === 4) y = y.slice(2);
+      return d + "/" + m + "/" + y;
+    }
+
+    function formatSchedule(raw) {
+      if (!raw) return "";
+      const cleaned = raw.replace(/-/g, ".").replace(/\//g, ".");
+      const parts = cleaned.split(".");
+      if (parts.length !== 3) return "";
+      let [d, m, y] = parts;
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+      if (y.length === 2) {
+        y = "20" + y;
+      }
+      return d + "/" + m + "/" + y;
+    }
+
+    function processCsv(text) {
+      resultBody.innerHTML = "";
+      allRows = [];
+      currentRows = [];
+      copyNamesBtn.disabled = true;
+      copyFixedNamesBtn.disabled = true;
+      fixNamesBtn.disabled = true;
+
+      const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      const map = new Map();
+      const examCount = new Map();
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const parts = line.split(";");
+        if (parts.length < 13) continue;
+
+        const schedRaw = (parts[6] || "").trim();
+        const cns = (parts[9] || "").trim();
+        const nameRaw = (parts[10] || "").trim();
+        const dobRaw = (parts[11] || "").trim();
+        const ageStr = (parts[12] || "").trim();
+
+        // Ignorar cabeçalhos e linhas inválidas
+        if (!/^\d{15}$/.test(cns)) continue;
+        if (!nameRaw || nameRaw.toLowerCase() === "nome") continue;
+
+        let age = parseInt(ageStr, 10);
+        if (isNaN(age)) age = null;
+
+        const sortKeySched = parseDateToSortKey(schedRaw);
+
+        if (!map.has(cns)) {
+          map.set(cns, {
+            nameRaw,
+            age,
+            dobRaw,
+            schedRaw,
+            schedSort: sortKeySched
+          });
+        } else {
+          const obj = map.get(cns);
+          if (!obj.schedSort || (sortKeySched && sortKeySched < obj.schedSort)) {
+            obj.schedRaw = schedRaw;
+            obj.schedSort = sortKeySched;
+          }
+        }
+
+        examCount.set(cns, (examCount.get(cns) || 0) + 1);
+      }
+
+      const result = Array.from(map.entries()).map(([cns, info]) => {
+        const baseName = toTitleCase(info.nameRaw);
+        const dobSort = parseDateToSortKey(info.dobRaw);
+        const dobFormatted = formatDob(info.dobRaw);
+        const schedFormatted = formatSchedule(info.schedRaw);
+        const exams = examCount.get(cns) || 0;
+        return {
+          cns,
+          baseName,
+          age: info.age,
+          dobRaw: info.dobRaw,
+          dobSort,
+          dobFormatted,
+          schedRaw: info.schedRaw,
+          schedSort: info.schedSort,
+          schedFormatted,
+          exams,
+          displayName: "",
+          fixedBaseName: null,
+          fixedDisplayName: ""
+        };
+      });
+
+      allRows = result;
+      rebuildDisplayNames();
+      currentSort = { column: "schedule", dir: "asc" };
+      renderTable();
+      if (allRows.length > 0) {
+        copyNamesBtn.disabled = false;
+        copyFixedNamesBtn.disabled = false;
+        fixNamesBtn.disabled = false;
+      }
+    }
+
+    function rebuildDisplayNames() {
+      // nomes originais
+      const nameCount = {};
+      for (const row of allRows) {
+        const key = row.baseName;
+        nameCount[key] = (nameCount[key] || 0) + 1;
+      }
+      for (const row of allRows) {
+        let displayName = row.baseName;
+        if (nameCount[row.baseName] > 1 && row.dobFormatted) {
+          displayName += " " + row.dobFormatted;
+        }
+        if (row.age !== null && row.age >= elderlyAge) {
+          displayName += "*";
+        }
+        row.displayName = displayName;
+      }
+
+      // nomes corrigidos (IA) – usa fixedBaseName se existir, senão baseName
+      const fixedNameCount = {};
+      for (const row of allRows) {
+        const base = row.fixedBaseName || row.baseName;
+        fixedNameCount[base] = (fixedNameCount[base] || 0) + 1;
+      }
+      for (const row of allRows) {
+        const base = row.fixedBaseName || row.baseName;
+        let fixedDisplay = base;
+        if (fixedNameCount[base] > 1 && row.dobFormatted) {
+          fixedDisplay += " " + row.dobFormatted;
+        }
+        if (row.age !== null && row.age >= elderlyAge) {
+          fixedDisplay += "*";
+        }
+        row.fixedDisplayName = fixedDisplay;
+      }
+    }
+
+    function applyFilters(rows) {
+      const fCns = filterCns.value.trim().toLowerCase();
+      const fName = filterName.value.trim().toLowerCase();
+      const fNameFixed = filterNameFixed.value.trim().toLowerCase();
+      const fAge = filterAge.value.trim().toLowerCase();
+      const fDob = filterDob.value.trim().toLowerCase();
+      const fSched = filterSchedule.value.trim().toLowerCase();
+      const fExams = filterExams.value.trim().toLowerCase();
+
+      return rows.filter(r => {
+        if (fCns && !r.cns.toLowerCase().includes(fCns)) return false;
+        if (fName && !r.displayName.toLowerCase().includes(fName)) return false;
+        if (fNameFixed && !r.fixedDisplayName.toLowerCase().includes(fNameFixed)) return false;
+        if (fAge && (r.age === null || !String(r.age).includes(fAge))) return false;
+        if (fDob && !r.dobFormatted.toLowerCase().includes(fDob)) return false;
+        if (fSched && !r.schedFormatted.toLowerCase().includes(fSched)) return false;
+        if (fExams && !String(r.exams).includes(fExams)) return false;
+        return true;
+      });
+    }
+
+    function sortRows(rows) {
+      const col = currentSort.column;
+      const dir = currentSort.dir === "asc" ? 1 : -1;
+
+      return rows.slice().sort((a, b) => {
+        let va, vb;
+
+        if (col === "cns") {
+          va = a.cns;
+          vb = b.cns;
+        } else if (col === "name") {
+          va = a.displayName;
+          vb = b.displayName;
+        } else if (col === "nameFixed") {
+          va = a.fixedDisplayName;
+          vb = b.fixedDisplayName;
+        } else if (col === "age") {
+          va = a.age === null ? -9999 : a.age;
+          vb = b.age === null ? -9999 : b.age;
+        } else if (col === "dob") {
+          va = a.dobSort || "";
+          vb = b.dobSort || "";
+        } else if (col === "schedule") {
+          va = a.schedSort || "";
+          vb = b.schedSort || "";
+        } else if (col === "exams") {
+          va = a.exams;
+          vb = b.exams;
+        } else {
+          va = "";
+          vb = "";
+        }
+
+        if (va < vb) return -1 * dir;
+        if (va > vb) return 1 * dir;
+        return 0;
+      });
+    }
+
+    function renderTable() {
+      resultBody.innerHTML = "";
+
+      document.querySelectorAll("thead .header-row th").forEach(th => {
+        th.classList.remove("sorted-asc", "sorted-desc");
+      });
+      const activeTh = document.querySelector(
+        'thead .header-row th[data-sort="' + currentSort.column + '"]'
+      );
+      if (activeTh) {
+        activeTh.classList.add(
+          currentSort.dir === "asc" ? "sorted-asc" : "sorted-desc"
+        );
+      }
+
+      let rows = applyFilters(allRows);
+      rows = sortRows(rows);
+      currentRows = rows;
+
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+
+        const tdCns = document.createElement("td");
+        tdCns.textContent = row.cns;
+        tr.appendChild(tdCns);
+
+        const tdName = document.createElement("td");
+        tdName.textContent = row.displayName;
+        tr.appendChild(tdName);
+
+        const tdNameFixed = document.createElement("td");
+        tdNameFixed.textContent = row.fixedDisplayName;
+        tr.appendChild(tdNameFixed);
+
+        const tdAge = document.createElement("td");
+        tdAge.textContent = row.age !== null ? row.age : "";
+        tr.appendChild(tdAge);
+
+        const tdDob = document.createElement("td");
+        tdDob.textContent = row.dobFormatted;
+        tr.appendChild(tdDob);
+
+        const tdSched = document.createElement("td");
+        tdSched.textContent = row.schedFormatted;
+        tr.appendChild(tdSched);
+
+        const tdExams = document.createElement("td");
+        tdExams.textContent = row.exams;
+        tr.appendChild(tdExams);
+
+        resultBody.appendChild(tr);
+      }
+
+      statusEl.textContent =
+        "Total de pacientes únicos: " +
+        allRows.length +
+        " | Exibidos: " +
+        rows.length;
+    }
+
+    function copyNames(useFixed) {
+      if (!currentRows.length) {
+        alert("Nenhuma lista carregada.");
+        return;
+      }
+      const names = currentRows
+        .map(r => (useFixed ? r.fixedDisplayName : r.displayName))
+        .join("\r\n");
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(names)
+          .then(() => alert("Nomes copiados para a área de transferência."))
+          .catch(() => fallbackCopy(names));
+      } else {
+        fallbackCopy(names);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        alert("Nomes copiados para a área de transferência.");
+      } catch (e) {
+        alert("Não foi possível copiar automaticamente. Selecione e copie manualmente.");
+      }
+      document.body.removeChild(textarea);
+    }
+
+    async function handleFixNamesIA() {
+      if (!allRows.length) {
+        alert("Nenhuma lista carregada.");
+        return;
+      }
+      fixNamesBtn.disabled = true;
+      statusEl.textContent = "Corrigindo nomes com IA...";
+
+      try {
+        const namesToFix = allRows.map(r => r.baseName);
+
+        const resp = await fetch(GROQ_FUNCTION, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nomes: namesToFix })
+        });
+
+        if (!resp.ok) {
+          throw new Error("Erro HTTP " + resp.status);
+        }
+
+        const data = await resp.json();
+        if (!data || !Array.isArray(data.nomesCorrigidos)) {
+          throw new Error("Resposta inesperada da IA");
+        }
+
+        const corrected = data.nomesCorrigidos;
+        if (corrected.length !== allRows.length) {
+          throw new Error("Quantidade de nomes corrigidos diferente da original.");
+        }
+
+        corrected.forEach((name, idx) => {
+          allRows[idx].fixedBaseName = name;
+        });
+
+        rebuildDisplayNames();
+        renderTable();
+        statusEl.textContent = "Nomes corrigidos com IA.";
+      } catch (err) {
+        console.error(err);
+        alert("Falha ao corrigir nomes com IA: " + err.message);
+        statusEl.textContent = "Erro ao corrigir nomes com IA.";
+      } finally {
+        fixNamesBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
