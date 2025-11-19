@@ -1,101 +1,462 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lista única por CNS</title>
-
-<style>
-body {font-family: Arial, sans-serif; margin: 20px;}
-table {border-collapse: collapse; width: 100%; margin-top: 10px;}
-th, td {border: 1px solid #ccc; padding: 6px; font-size: 14px;}
-th {background: #f4f4f4;}
-input[type="text"] {width: 95%; padding: 4px;}
-button {padding: 6px 12px; margin: 5px; cursor: pointer;}
-</style>
-
+  <meta charset="UTF-8">
+  <title>Lista única de pacientes por CNS</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+    label {
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+    #status {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #444;
+    }
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 4px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 16px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    th {
+      background: #f2f2f2;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    th.sortable::after {
+      content: " ⇅";
+      font-size: 10px;
+      color: #666;
+    }
+    th.sorted-asc::after {
+      content: " ↑";
+    }
+    th.sorted-desc::after {
+      content: " ↓";
+    }
+    thead tr.filter-row th {
+      background: #fafafa;
+      cursor: default;
+    }
+    thead tr.filter-row input {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 12px;
+      padding: 2px 4px;
+    }
+  </style>
 </head>
 <body>
+  <h1>Lista única por CNS</h1>
 
-<h2>Lista única por CNS</h2>
+  <label>
+    Selecione o arquivo CSV:
+    <input type="file" id="fileInput" accept=".csv,.txt">
+  </label>
 
-<label>Selecione o arquivo CSV:
-    <input type="file" id="csvFile" accept=".csv">
-</label>
+  <div id="status">Nenhum arquivo carregado.</div>
 
-<div style="margin-top:10px;">
-    <button onclick="copiarNomes()">Copiar nomes</button>
-</div>
+  <div class="actions">
+    <button id="copyNamesBtn" disabled>Copiar nomes</button>
+  </div>
 
-<table id="tabela">
+  <table>
     <thead>
-        <tr>
-            <th>CNS<br><input type="text" onkeyup="filtrar(0,this.value)"></th>
-            <th>Nome<br><input type="text" onkeyup="filtrar(1,this.value)"></th>
-            <th>Dt nasc.<br><input type="text" onkeyup="filtrar(2,this.value)"></th>
-            <th>Dt agendamento<br><input type="text" onkeyup="filtrar(3,this.value)"></th>
-            <th>Qtde exames<br><input type="text" onkeyup="filtrar(4,this.value)"></th>
-        </tr>
+      <tr class="header-row">
+        <th class="sortable" data-sort="cns">CNS</th>
+        <th class="sortable" data-sort="name">Nome</th>
+        <th class="sortable" data-sort="age">Idade</th>
+        <th class="sortable" data-sort="dob">Dt nasc.</th>
+        <th class="sortable" data-sort="schedule">Dt agendamento</th>
+        <th class="sortable" data-sort="exams">Qtde exames</th>
+      </tr>
+      <tr class="filter-row">
+        <th><input id="filterCns" placeholder="filtrar CNS"></th>
+        <th><input id="filterName" placeholder="filtrar nome"></th>
+        <th><input id="filterAge" placeholder="filtrar idade"></th>
+        <th><input id="filterDob" placeholder="filtrar dt nasc."></th>
+        <th><input id="filterSchedule" placeholder="filtrar dt ag."></th>
+        <th><input id="filterExams" placeholder="filtrar qtde"></th>
+      </tr>
     </thead>
-    <tbody></tbody>
-</table>
+    <tbody id="resultBody"></tbody>
+  </table>
 
-<script>
-function filtrar(col, termo) {
-    const linhas = document.querySelectorAll("#tabela tbody tr");
-    termo = termo.toLowerCase();
-    linhas.forEach(linha => {
-        const valor = linha.children[col].innerText.toLowerCase();
-        linha.style.display = valor.includes(termo) ? "" : "none";
+  <script>
+    const elderlyAge = 60;
+
+    const fileInput = document.getElementById("fileInput");
+    const statusEl = document.getElementById("status");
+    const resultBody = document.getElementById("resultBody");
+    const copyNamesBtn = document.getElementById("copyNamesBtn");
+
+    const filterCns = document.getElementById("filterCns");
+    const filterName = document.getElementById("filterName");
+    const filterAge = document.getElementById("filterAge");
+    const filterDob = document.getElementById("filterDob");
+    const filterSchedule = document.getElementById("filterSchedule");
+    const filterExams = document.getElementById("filterExams");
+
+    let allRows = [];
+    let currentRows = [];
+    let currentSort = { column: "schedule", dir: "asc" };
+
+    fileInput.addEventListener("change", handleFile, false);
+    copyNamesBtn.addEventListener("click", copyNames);
+
+    [filterCns, filterName, filterAge, filterDob, filterSchedule, filterExams].forEach(input => {
+      input.addEventListener("input", () => renderTable());
     });
-}
 
-document.getElementById("csvFile").addEventListener("change", function (e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function (event) {
-        const linhas = event.target.result.split(/\r?\n/);
-        preencherTabela(linhas);
-    };
-    reader.readAsText(file, "UTF-8");
-});
-
-function preencherTabela(linhas) {
-    const tbody = document.querySelector("#tabela tbody");
-    tbody.innerHTML = "";
-
-    linhas.forEach((linha, index) => {
-        if (!linha.trim()) return;
-        const col = linha.split(",");
-
-        // evitar repetir cabeçalho no meio da lista
-        if (index > 0 && col[0].toLowerCase().includes("cns")) return;
-
-        const tr = document.createElement("tr");
-        for (let i = 0; i < 5; i++) {
-            const td = document.createElement("td");
-            td.textContent = col[i] ? col[i].trim() : "";
-            tr.appendChild(td);
+    document.querySelectorAll("thead .header-row th.sortable").forEach(th => {
+      th.addEventListener("click", () => {
+        const col = th.getAttribute("data-sort");
+        if (currentSort.column === col) {
+          currentSort.dir = currentSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          currentSort.column = col;
+          currentSort.dir = "asc";
         }
-        tbody.appendChild(tr);
-    });
-}
-
-function copiarNomes() {
-    const linhas = document.querySelectorAll("#tabela tbody tr");
-    let texto = "";
-
-    linhas.forEach(linha => {
-        const nome = linha.children[1].innerText.trim();
-        if (nome) texto += nome + "\n";
+        renderTable();
+      });
     });
 
-    navigator.clipboard.writeText(texto);
-    alert("Nomes copiados!");
-}
-</script>
+    function handleFile(evt) {
+      const file = evt.target.files[0];
+      if (!file) {
+        statusEl.textContent = "Nenhum arquivo selecionado.";
+        return;
+      }
 
+      statusEl.textContent = "Lendo arquivo...";
+      const reader = new FileReader();
+      reader.readAsText(file, "ISO-8859-1");
+
+      reader.onload = function (e) {
+        const text = e.target.result;
+        processCsv(text);
+      };
+
+      reader.onerror = function () {
+        statusEl.textContent = "Erro ao ler o arquivo.";
+      };
+    }
+
+    function toTitleCase(str) {
+      return str
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
+
+    function parseDateToSortKey(raw) {
+      if (!raw) return "";
+      const cleaned = raw.replace(/-/g, ".").replace(/\//g, ".");
+      const parts = cleaned.split(".");
+      if (parts.length !== 3) return "";
+      let [d, m, y] = parts;
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+      if (y.length === 2) {
+        y = "20" + y;
+      }
+      return y + "-" + m + "-" + d;
+    }
+
+    function formatDob(dobRaw) {
+      if (!dobRaw) return "";
+      const cleaned = dobRaw.replace(/-/g, ".").replace(/\//g, ".");
+      const parts = cleaned.split(".");
+      if (parts.length !== 3) return "";
+      let [d, m, y] = parts;
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+      if (y.length === 4) y = y.slice(2);
+      return d + "/" + m + "/" + y;
+    }
+
+    function formatSchedule(raw) {
+      if (!raw) return "";
+      const cleaned = raw.replace(/-/g, ".").replace(/\//g, ".");
+      const parts = cleaned.split(".");
+      if (parts.length !== 3) return "";
+      let [d, m, y] = parts;
+      d = d.padStart(2, "0");
+      m = m.padStart(2, "0");
+      if (y.length === 2) {
+        y = "20" + y;
+      }
+      return d + "/" + m + "/" + y;
+    }
+
+    function processCsv(text) {
+      resultBody.innerHTML = "";
+      allRows = [];
+      currentRows = [];
+      copyNamesBtn.disabled = true;
+
+      const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+      const map = new Map();
+      const examCount = new Map();
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const parts = line.split(";");
+        if (parts.length < 13) continue;
+
+        const schedRaw = (parts[6] || "").trim();
+        const cns = (parts[9] || "").trim();
+        const nameRaw = (parts[10] || "").trim();
+        const dobRaw = (parts[11] || "").trim();
+        const ageStr = (parts[12] || "").trim();
+
+        // Ignorar cabeçalhos e linhas inválidas
+        if (!/^\d{15}$/.test(cns)) continue;
+        if (!nameRaw || nameRaw.toLowerCase() === "nome") continue;
+
+        let age = parseInt(ageStr, 10);
+        if (isNaN(age)) age = null;
+
+        const sortKeySched = parseDateToSortKey(schedRaw);
+
+        if (!map.has(cns)) {
+          map.set(cns, {
+            nameRaw,
+            age,
+            dobRaw,
+            schedRaw,
+            schedSort: sortKeySched
+          });
+        } else {
+          const obj = map.get(cns);
+          if (!obj.schedSort || (sortKeySched && sortKeySched < obj.schedSort)) {
+            obj.schedRaw = schedRaw;
+            obj.schedSort = sortKeySched;
+          }
+        }
+
+        examCount.set(cns, (examCount.get(cns) || 0) + 1);
+      }
+
+      const result = Array.from(map.entries()).map(([cns, info]) => {
+        const baseName = toTitleCase(info.nameRaw);
+        const dobSort = parseDateToSortKey(info.dobRaw);
+        const dobFormatted = formatDob(info.dobRaw);
+        const schedFormatted = formatSchedule(info.schedRaw);
+        return {
+          cns,
+          baseName,
+          age: info.age,
+          dobRaw: info.dobRaw,
+          dobSort,
+          dobFormatted,
+          schedRaw: info.schedRaw,
+          schedSort: info.schedSort,
+          schedFormatted,
+          exams: examCount.get(cns) || 0,
+          displayName: ""
+        };
+      });
+
+      const nameCount = {};
+      for (const row of result) {
+        const key = row.baseName;
+        nameCount[key] = (nameCount[key] || 0) + 1;
+      }
+
+      for (const row of result) {
+        let displayName = row.baseName;
+        if (nameCount[row.baseName] > 1) {
+          const dobFormatted = formatDob(row.dobRaw);
+          if (dobFormatted) {
+            displayName = displayName + " " + dobFormatted;
+          }
+        }
+        if (row.age !== null && row.age >= elderlyAge) {
+          displayName = displayName + "*";
+        }
+        row.displayName = displayName;
+      }
+
+      allRows = result;
+      currentSort = { column: "schedule", dir: "asc" };
+      renderTable();
+      if (allRows.length > 0) {
+        copyNamesBtn.disabled = false;
+      }
+    }
+
+    function applyFilters(rows) {
+      const fCns = filterCns.value.trim().toLowerCase();
+      const fName = filterName.value.trim().toLowerCase();
+      const fAge = filterAge.value.trim().toLowerCase();
+      const fDob = filterDob.value.trim().toLowerCase();
+      const fSched = filterSchedule.value.trim().toLowerCase();
+      const fExams = filterExams.value.trim().toLowerCase();
+
+      return rows.filter(r => {
+        if (fCns && !r.cns.toLowerCase().includes(fCns)) return false;
+        if (fName && !r.displayName.toLowerCase().includes(fName)) return false;
+        if (fAge && (r.age === null || !String(r.age).includes(fAge))) return false;
+        if (fDob && !r.dobFormatted.toLowerCase().includes(fDob)) return false;
+        if (fSched && !r.schedFormatted.toLowerCase().includes(fSched)) return false;
+        if (fExams && !String(r.exams).includes(fExams)) return false;
+        return true;
+      });
+    }
+
+    function sortRows(rows) {
+      const col = currentSort.column;
+      const dir = currentSort.dir === "asc" ? 1 : -1;
+
+      return rows.slice().sort((a, b) => {
+        let va, vb;
+
+        if (col === "cns") {
+          va = a.cns;
+          vb = b.cns;
+        } else if (col === "name") {
+          va = a.displayName;
+          vb = b.displayName;
+        } else if (col === "age") {
+          va = a.age === null ? -9999 : a.age;
+          vb = b.age === null ? -9999 : b.age;
+        } else if (col === "dob") {
+          va = a.dobSort || "";
+          vb = b.dobSort || "";
+        } else if (col === "schedule") {
+          va = a.schedSort || "";
+          vb = b.schedSort || "";
+        } else if (col === "exams") {
+          va = a.exams;
+          vb = b.exams;
+        } else {
+          va = "";
+          vb = "";
+        }
+
+        if (va < vb) return -1 * dir;
+        if (va > vb) return 1 * dir;
+        return 0;
+      });
+    }
+
+    function renderTable() {
+      resultBody.innerHTML = "";
+
+      document.querySelectorAll("thead .header-row th").forEach(th => {
+        th.classList.remove("sorted-asc", "sorted-desc");
+      });
+      const activeTh = document.querySelector(
+        'thead .header-row th[data-sort="' + currentSort.column + '"]'
+      );
+      if (activeTh) {
+        activeTh.classList.add(
+          currentSort.dir === "asc" ? "sorted-asc" : "sorted-desc"
+        );
+      }
+
+      let rows = applyFilters(allRows);
+      rows = sortRows(rows);
+      currentRows = rows;
+
+      for (const row of rows) {
+        const tr = document.createElement("tr");
+
+        const tdCns = document.createElement("td");
+        tdCns.textContent = row.cns;
+        tr.appendChild(tdCns);
+
+        const tdName = document.createElement("td");
+        tdName.textContent = row.displayName;
+        tr.appendChild(tdName);
+
+        const tdAge = document.createElement("td");
+        tdAge.textContent = row.age !== null ? row.age : "";
+        tr.appendChild(tdAge);
+
+        const tdDob = document.createElement("td");
+        tdDob.textContent = row.dobFormatted;
+        tr.appendChild(tdDob);
+
+        const tdSched = document.createElement("td");
+        tdSched.textContent = row.schedFormatted;
+        tr.appendChild(tdSched);
+
+        const tdExams = document.createElement("td");
+        tdExams.textContent = row.exams;
+        tr.appendChild(tdExams);
+
+        resultBody.appendChild(tr);
+      }
+
+      statusEl.textContent =
+        "Total de pacientes únicos: " +
+        allRows.length +
+        " | Exibidos: " +
+        rows.length;
+    }
+
+    function copyNames() {
+      if (!currentRows.length) {
+        alert("Nenhuma lista carregada.");
+        return;
+      }
+
+      // garante cada nome em uma linha ao colar em planilha
+      const names = currentRows.map(r => r.displayName).join("\r\n");
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(names)
+          .then(() => alert("Nomes copiados para a área de transferência."))
+          .catch(() => fallbackCopy(names));
+      } else {
+        fallbackCopy(names);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        alert("Nomes copiados para a área de transferência.");
+      } catch (e) {
+        alert("Não foi possível copiar automaticamente. Selecione e copie manualmente.");
+      }
+      document.body.removeChild(textarea);
+    }
+  </script>
 </body>
 </html>
