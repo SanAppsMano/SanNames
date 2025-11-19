@@ -1,130 +1,247 @@
-let registros=[];let filtrados=[];let novos=[];let ultimaLista=[];
+let registros = [];
+let agregadosOrig = [];
+let filtrados = [];
+let novos = [];
+let registrosIntervalo = [];
+let ultimaDataInicio = null;
+let ultimaDataFim = null;
 
-// Leitura CSV
-const csvFile=document.getElementById("csvFile");
-csvFile.addEventListener("change",()=>{
- const f=csvFile.files[0]; if(!f) return;
- const r=new FileReader();
- r.onload=e=>{registros=parseCSV(e.target.result); alert("CSV carregado!")};
- r.readAsText(f,"UTF-8");
+const csvFile = document.getElementById("csvFile");
+const btnAplicar = document.getElementById("btnAplicar");
+const campoPesquisa = document.getElementById("pesquisa");
+const tabelaBody = document.querySelector("#tabelaPacientes tbody");
+const modal = document.getElementById("modal");
+const modalContent = document.getElementById("modalContent");
+const btnCopiarNovos = document.getElementById("btnCopiarNovos");
+
+csvFile.addEventListener("change", () => {
+  const f = csvFile.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    registros = parseCSV(e.target.result);
+    alert("CSV carregado!");
+  };
+  r.readAsText(f, "UTF-8");
 });
 
-function parseCSV(txt){
- let l=txt.trim().split(/\r?\n/);
- return l.slice(1).map(x=>{let c=x.split(";"); return {cns:c[0],nome:c[1],nasc:c[2],data:c[3],exame:c[4]};});
+function parseCSV(txt) {
+  const linhas = txt.trim().split(/\r?\n/);
+  if (!linhas.length) return [];
+  const header = linhas.shift().split(";");
+  const idx = {
+    cns: header.indexOf("cns"),
+    nome: header.indexOf("nome"),
+    nasc: header.indexOf("dt_nascimento"),
+    data: header.indexOf("data_agendamento"),
+    exame: header.indexOf("descricao_procedimento")
+  };
+  return linhas.map(l => {
+    const c = l.split(";");
+    return {
+      cns: c[idx.cns] || "",
+      nome: c[idx.nome] || "",
+      nasc: c[idx.nasc] || "",
+      data: c[idx.data] || "",
+      exame: c[idx.exame] || ""
+    };
+  });
 }
 
-function normalizar(n){return n.toLowerCase().replace(/(?:^|\s)\S/g,m=>m.toUpperCase());}
-
-// Aplicar filtros
-const btnAplicar=document.getElementById("btnAplicar");
-btnAplicar.onclick=()=>processar();
-
-function processar(){
- let ini=document.getElementById("dataInicio").value;
- let fim=document.getElementById("dataFim").value;
- if(!ini||!fim){alert("Selecione o intervalo de datas.");return;}
- let d1=new Date(ini), d2=new Date(fim);
-
- let mapa={};
- registros.forEach(r=>{
-   let dt=new Date(r.data.split("/").reverse().join("-"));
-   if(dt>=d1 && dt<=d2){
-     if(!mapa[r.cns]) mapa[r.cns]={cns:r.cns,nome:r.nome,nasc:r.nasc,exames:0,dias:{}};
-     mapa[r.cns].exames++;
-     mapa[r.cns].dias[r.data]=true;
-   }
- });
- filtrados=Object.values(mapa).map(x=>{
-   x.nome=normalizar(x.nome);
-   x.presencas=Object.keys(x.dias).length;
-   return x;
- });
- detectarNovos();
- renderTabela();
- renderGrafico();
- atualizarArmazenamento();
+function normalizarNome(n) {
+  return (n || "").toLowerCase().replace(/(?:^|\s)\S/g, m => m.toUpperCase());
 }
 
-// Renderizar tabela
-function renderTabela(){
- let tb=document.querySelector("#tabelaPacientes tbody");
- tb.innerHTML="";
- filtrados.forEach(r=>{
-   let tr=document.createElement("tr");
-   tr.innerHTML=`<td>${r.cns}</td><td>${r.nome}</td><td>${r.nasc}</td><td>${r.exames}</td><td>${r.presencas}</td>`;
-   tr.onclick=()=>mostrarExames(r.cns);
-   tb.appendChild(tr);
- });
+function parseDataAgendamento(s) {
+  if (!s) return null;
+  const partes = s.split(".");
+  if (partes.length !== 3) return null;
+  const [dd, mm, yyyy] = partes;
+  return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
 }
 
-// Pesquisar
-const campoPesquisa=document.getElementById("pesquisa");
-campoPesquisa.oninput=()=>{
- let q=campoPesquisa.value.toLowerCase();
- filtrados=filtrados.filter(x=>x.nome.toLowerCase().includes(q));
- renderTabela();
+btnAplicar.onclick = () => processar();
+
+function processar() {
+  if (!registros.length) {
+    alert("Carregue um CSV primeiro.");
+    return;
+  }
+  const iniStr = document.getElementById("dataInicio").value;
+  const fimStr = document.getElementById("dataFim").value;
+  if (!iniStr || !fimStr) {
+    alert("Selecione o intervalo de datas.");
+    return;
+  }
+  ultimaDataInicio = iniStr;
+  ultimaDataFim = fimStr;
+  const d1 = new Date(iniStr + "T00:00:00");
+  const d2 = new Date(fimStr + "T23:59:59");
+
+  const mapa = {};
+  registrosIntervalo = [];
+
+  registros.forEach(r => {
+    const dt = parseDataAgendamento(r.data);
+    if (!dt) return;
+    if (dt >= d1 && dt <= d2) {
+      registrosIntervalo.push(r);
+      if (!mapa[r.cns]) {
+        mapa[r.cns] = {
+          cns: r.cns,
+          nome: r.nome,
+          nasc: r.nasc,
+          exames: 0,
+          dias: {}
+        };
+      }
+      mapa[r.cns].exames += 1;
+      mapa[r.cns].dias[r.data] = true;
+    }
+  });
+
+  agregadosOrig = Object.values(mapa).map(x => {
+    return {
+      cns: x.cns,
+      nome: normalizarNome(x.nome),
+      nasc: x.nasc,
+      exames: x.exames,
+      dias: x.dias,
+      presencas: Object.keys(x.dias).length
+    };
+  });
+
+  filtrados = agregadosOrig.slice();
+  detectarNovos();
+  renderTabela();
+  renderGrafico();
+  atualizarArmazenamento();
+}
+
+function renderTabela() {
+  tabelaBody.innerHTML = "";
+  filtrados.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.cns}</td><td>${r.nome}</td><td>${r.nasc}</td><td>${r.exames}</td><td>${r.presencas}</td>`;
+    tr.onclick = () => mostrarExames(r.cns);
+    tabelaBody.appendChild(tr);
+  });
+}
+
+campoPesquisa.oninput = () => {
+  const q = campoPesquisa.value.toLowerCase().trim();
+  if (!q) {
+    filtrados = agregadosOrig.slice();
+  } else {
+    filtrados = agregadosOrig.filter(x =>
+      x.nome.toLowerCase().includes(q) || (x.cns || "").includes(q)
+    );
+  }
+  renderTabela();
 };
 
-// Ordenação
-const ths=document.querySelectorAll("#tabelaPacientes th");
-ths.forEach(th=>{
- th.addEventListener("click",()=>{
-   let col=th.dataset.col;
-   filtrados.sort((a,b)=> a[col]>b[col] ? 1 : -1);
-   renderTabela();
- });
+const ths = document.querySelectorAll("#tabelaPacientes th");
+ths.forEach(th => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.col;
+    filtrados.sort((a, b) => {
+      const va = a[col] || "";
+      const vb = b[col] || "";
+      if (typeof va === "number" && typeof vb === "number") return va - vb;
+      return String(va).localeCompare(String(vb), "pt-BR");
+    });
+    renderTabela();
+  });
 });
 
-// Modal de exames
-function mostrarExames(cns){
- let lista=registros.filter(x=>x.cns===cns);
- let m=document.getElementById("modal");
- let c=document.getElementById("modalContent");
- let html=`<h2>Exames</h2>`;
- lista.forEach(x=> html+=`<p><b>${x.exame}</b> — ${x.data}</p>`);
- c.innerHTML=html;
- m.style.display="flex";
-}
-document.getElementById("modal").onclick=()=>document.getElementById("modal").style.display="none";
-
-// Novos registros
-function detectarNovos(){
- let last=JSON.parse(localStorage.getItem("ultimaLista")||"[]");
- let antigos=new Set(last.map(x=>x.cns));
- novos=filtrados.filter(x=>!antigos.has(x.cns));
- localStorage.setItem("ultimaLista",JSON.stringify(filtrados));
- document.getElementById("listaNovos").innerHTML=novos.map(x=>x.nome).join("<br>");
+function mostrarExames(cns) {
+  const lista = registrosIntervalo.length
+    ? registrosIntervalo.filter(x => x.cns === cns)
+    : registros.filter(x => x.cns === cns);
+  let html = `<h2>Exames</h2>`;
+  lista.forEach(x => {
+    html += `<p><b>${x.exame}</b> — ${x.data}</p>`;
+  });
+  modalContent.innerHTML = html;
+  modal.style.display = "flex";
 }
 
-document.getElementById("btnCopiarNovos").onclick=()=>{
- let txt=novos.map(x=>x.nome).join("\n");
- navigator.clipboard.writeText(txt);
- alert("Copiado!");
+modal.onclick = () => {
+  modal.style.display = "none";
 };
 
-// Armazenamento
-function atualizarArmazenamento(){
- let usado=JSON.stringify(localStorage).length;
- let max=5*1024*1024;
- let pct=((usado/max)*100).toFixed(1);
- document.getElementById("armazenamentoInfo").innerText=`Uso: ${pct}%`;
+function detectarNovos() {
+  let last = [];
+  try {
+    last = JSON.parse(localStorage.getItem("ultimaLista") || "[]");
+  } catch (_) {
+    last = [];
+  }
+  const antigos = new Set(last.map(x => x.cns));
+  novos = filtrados.filter(x => !antigos.has(x.cns));
+  localStorage.setItem("ultimaLista", JSON.stringify(filtrados));
+  const div = document.getElementById("listaNovos");
+  div.innerHTML = novos.map(x => x.nome).join("<br>");
 }
 
-// Gráfico — implementado sem libs externas
-function renderGrafico(){
- let canvas=document.getElementById("grafico");
- let ctx=canvas.getContext("2d");
- ctx.clearRect(0,0,canvas.width,canvas.height);
- let dias={}; filtrados.forEach(x=>{dias[x.cns]=(dias[x.cns]||0)+x.exames});
- let valores=Object.values(dias);
- let labels=Object.keys(dias);
- let max=Math.max(...valores,1);
- let w=canvas.width/(labels.length||1);
- ctx.fillStyle="#005dff";
- valores.forEach((v,i)=>{
-   let h=(v/max)*(canvas.height-20);
-   ctx.fillRect(i*w+10,canvas.height-h, w-20, h);
-   ctx.fillText(labels[i].slice(-4), i*w+10, canvas.height-5);
- });
+btnCopiarNovos.onclick = () => {
+  const txt = novos.map(x => x.nome).join("\n");
+  if (!txt) {
+    alert("Não há novos nomes.");
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(() => {
+      alert("Novos nomes copiados.");
+    }).catch(() => {
+      alert("Não foi possível copiar automaticamente.");
+    });
+  } else {
+    alert("Clipboard não suportado neste navegador.");
+  }
+};
+
+function atualizarArmazenamento() {
+  let usado = 0;
+  try {
+    usado = JSON.stringify(localStorage).length;
+  } catch (_) {
+    usado = 0;
+  }
+  const max = 5 * 1024 * 1024;
+  const pct = ((usado / max) * 100).toFixed(1);
+  document.getElementById("armazenamentoInfo").innerText = `Uso estimado do localStorage: ${pct}%`;
+}
+
+function renderGrafico() {
+  const canvas = document.getElementById("grafico");
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width = canvas.clientWidth || 600;
+  const h = canvas.height = canvas.clientHeight || 300;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!registrosIntervalo.length) return;
+
+  const dias = {};
+  registrosIntervalo.forEach(r => {
+    const d = r.data || "";
+    dias[d] = (dias[d] || 0) + 1;
+  });
+
+  const labels = Object.keys(dias);
+  const valores = labels.map(d => dias[d]);
+  const max = Math.max(...valores, 1);
+  const barWidth = w / (labels.length || 1);
+
+  ctx.fillStyle = "#005dff";
+  ctx.font = "10px Arial";
+  ctx.textAlign = "center";
+
+  valores.forEach((v, i) => {
+    const x = i * barWidth + barWidth / 2;
+    const barH = (v / max) * (h - 40);
+    const y = h - 20 - barH;
+    ctx.fillRect(x - (barWidth * 0.5) * 0.6, y, barWidth * 0.6, barH);
+    ctx.fillText(labels[i], x, h - 8);
+  });
 }
