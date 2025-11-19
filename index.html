@@ -1,462 +1,357 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Lista única de pacientes por CNS</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 16px;
-    }
-    h1 {
-      font-size: 20px;
-      margin-bottom: 12px;
-    }
-    label {
-      display: inline-block;
-      margin-bottom: 8px;
-    }
-    #status {
-      margin-top: 8px;
-      font-size: 13px;
-      color: #444;
-    }
-    .actions {
-      margin-top: 10px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    button {
-      padding: 4px 10px;
-      font-size: 13px;
-      cursor: pointer;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin-top: 16px;
-      font-size: 13px;
-    }
-    th, td {
-      border: 1px solid #ccc;
-      padding: 4px 6px;
-      text-align: left;
-    }
-    th {
-      background: #f2f2f2;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    th.sortable::after {
-      content: " ⇅";
-      font-size: 10px;
-      color: #666;
-    }
-    th.sorted-asc::after {
-      content: " ↑";
-    }
-    th.sorted-desc::after {
-      content: " ↓";
-    }
-    thead tr.filter-row th {
-      background: #fafafa;
-      cursor: default;
-    }
-    thead tr.filter-row input {
-      width: 100%;
-      box-sizing: border-box;
-      font-size: 12px;
-      padding: 2px 4px;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Lista SUS por intervalo</title>
+<style>
+body { font-family: Arial, sans-serif; padding: 16px; }
+h2 { margin-bottom: 10px; }
+label { display: block; margin-bottom: 6px; }
+input[type=date] { padding: 4px; margin-right: 10px; }
+button { padding: 5px 10px; font-size: 13px; margin-right: 6px; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+th, td { border: 1px solid #ccc; padding: 6px; }
+th { background: #f2f2f2; cursor: pointer; }
+tr.novo td { background: #d8ffd8; }
+
+#historico { margin-top: 20px; font-size: 13px; background: #fafafa; padding: 10px; border: 1px solid #ddd; max-width: 480px; }
+#armazenamento { margin-top: 16px; font-size: 13px; background: #fdfdfd; padding: 10px; border: 1px solid #ddd; max-width: 480px; }
+#armaInfo { margin-top: 6px; white-space: pre-line; }
+#armaAviso { margin-top: 6px; font-weight: bold; }
+#armaAviso.ok { color: #166534; }
+#armaAviso.alerta { color: #b45309; }
+#armaAviso.critico { color: #b91c1c; }
+</style>
 </head>
 <body>
-  <h1>Lista única por CNS</h1>
 
-  <label>
-    Selecione o arquivo CSV:
-    <input type="file" id="fileInput" accept=".csv,.txt">
-  </label>
+<h2>Processador de lista SUS por intervalo</h2>
 
-  <div id="status">Nenhum arquivo carregado.</div>
+<label>
+Arquivo CSV:
+<input type="file" id="csvFile" accept=".csv,.txt">
+</label>
 
-  <div class="actions">
-    <button id="copyNamesBtn" disabled>Copiar nomes</button>
-  </div>
+<div>
+Data inicial:
+<input type="date" id="dataIni">
+Data final:
+<input type="date" id="dataFim">
+<button id="aplicar">Aplicar intervalo</button>
+</div>
 
-  <table>
-    <thead>
-      <tr class="header-row">
-        <th class="sortable" data-sort="cns">CNS</th>
-        <th class="sortable" data-sort="name">Nome</th>
-        <th class="sortable" data-sort="age">Idade</th>
-        <th class="sortable" data-sort="dob">Dt nasc.</th>
-        <th class="sortable" data-sort="schedule">Dt agendamento</th>
-        <th class="sortable" data-sort="exams">Qtde exames</th>
-      </tr>
-      <tr class="filter-row">
-        <th><input id="filterCns" placeholder="filtrar CNS"></th>
-        <th><input id="filterName" placeholder="filtrar nome"></th>
-        <th><input id="filterAge" placeholder="filtrar idade"></th>
-        <th><input id="filterDob" placeholder="filtrar dt nasc."></th>
-        <th><input id="filterSchedule" placeholder="filtrar dt ag."></th>
-        <th><input id="filterExams" placeholder="filtrar qtde"></th>
-      </tr>
-    </thead>
-    <tbody id="resultBody"></tbody>
-  </table>
+<div style="margin-top:10px;">
+<button id="copiarPeriodo" disabled>Copiar nomes do período</button>
+<button id="copiarNovos" disabled>Copiar novos nomes</button>
+</div>
 
-  <script>
-    const elderlyAge = 60;
+<table>
+<thead>
+<tr>
+<th>CNS</th>
+<th>Nome</th>
+<th>Idade</th>
+<th>Nasc</th>
+<th>Primeiro agendamento</th>
+<th>Último agendamento</th>
+<th>Exames</th>
+<th>Novo</th>
+</tr>
+</thead>
+<tbody id="tb"></tbody>
+</table>
 
-    const fileInput = document.getElementById("fileInput");
-    const statusEl = document.getElementById("status");
-    const resultBody = document.getElementById("resultBody");
-    const copyNamesBtn = document.getElementById("copyNamesBtn");
+<div id="historico">
+<b>Histórico de intervalos:</b>
+<div id="hist"></div>
+</div>
 
-    const filterCns = document.getElementById("filterCns");
-    const filterName = document.getElementById("filterName");
-    const filterAge = document.getElementById("filterAge");
-    const filterDob = document.getElementById("filterDob");
-    const filterSchedule = document.getElementById("filterSchedule");
-    const filterExams = document.getElementById("filterExams");
+<div id="armazenamento">
+<b>Armazenamento local (localStorage):</b>
+<div id="armaInfo"></div>
+<div id="armaAviso"></div>
+<div style="margin-top:6px;">
+  <button id="btAtualizarArma">Atualizar info</button>
+  <button id="btLimparHistorico">Limpar histórico gravado</button>
+</div>
+<small>
+Chaves usadas:<br>
+<b>historicoChaves</b> = lista dos pares CNS + data de agendamento já vistos<br>
+<b>historicoIntervalos</b> = lista dos intervalos que você aplicou na tela
+</small>
+</div>
 
-    let allRows = [];
-    let currentRows = [];
-    let currentSort = { column: "schedule", dir: "asc" };
+<script>
+let registros = [];
+let historicoChaves = JSON.parse(localStorage.getItem("historicoChaves")||"{}");
+let historicoIntervalos = JSON.parse(localStorage.getItem("historicoIntervalos")||"[]");
 
-    fileInput.addEventListener("change", handleFile, false);
-    copyNamesBtn.addEventListener("click", copyNames);
+function toSortDate(s){
+  if(!s) return "";
+  let p = s.replace(/\/|-/g,".").split(".");
+  if(p.length!=3) return "";
+  let [d,m,y]=p;
+  d=d.padStart(2,"0");
+  m=m.padStart(2,"0");
+  if(y.length==2) y="20"+y;
+  return y+"-"+m+"-"+d;
+}
 
-    [filterCns, filterName, filterAge, filterDob, filterSchedule, filterExams].forEach(input => {
-      input.addEventListener("input", () => renderTable());
-    });
+function toHuman(s){
+  if(!s) return "";
+  let p=s.split("-");
+  return p[2]+"/"+p[1]+"/"+p[0];
+}
 
-    document.querySelectorAll("thead .header-row th.sortable").forEach(th => {
-      th.addEventListener("click", () => {
-        const col = th.getAttribute("data-sort");
-        if (currentSort.column === col) {
-          currentSort.dir = currentSort.dir === "asc" ? "desc" : "asc";
-        } else {
-          currentSort.column = col;
-          currentSort.dir = "asc";
-        }
-        renderTable();
+function toTitle(s){
+  return s.toLowerCase().split(" ").map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" ");
+}
+
+document.getElementById("csvFile").addEventListener("change", e=>{
+  let f=e.target.files[0];
+  if(!f) return;
+  let r=new FileReader();
+  r.onload=x=>{
+    let lines=x.target.result.split(/\r?\n/);
+    registros=[];
+    for(let ln of lines){
+      let c=ln.split(";");
+      if(c.length<13) continue;
+      let cns=c[9].trim();
+      let nome=c[10].trim();
+      let nasc=c[11].trim();
+      let idade=c[12].trim();
+      let ag=c[6].trim();
+
+      if(!/^\d{15}$/.test(cns)) continue;
+      if(!nome) continue;
+
+      registros.push({
+        cns,
+        nome: toTitle(nome),
+        nasc,
+        idade: idade?parseInt(idade):null,
+        agRaw: ag,
+        agSort: toSortDate(ag),
+        chave: cns+"|"+toSortDate(ag)
       });
-    });
+    }
+    alert("Arquivo carregado com "+registros.length+" exames");
+  };
+  r.readAsText(f,"ISO-8859-1");
+});
 
-    function handleFile(evt) {
-      const file = evt.target.files[0];
-      if (!file) {
-        statusEl.textContent = "Nenhum arquivo selecionado.";
-        return;
-      }
+document.getElementById("aplicar").addEventListener("click",()=>{
+  let ini=document.getElementById("dataIni").value;
+  let fim=document.getElementById("dataFim").value;
+  if(!ini || !fim){
+    alert("Escolha data inicial e final");
+    return;
+  }
 
-      statusEl.textContent = "Lendo arquivo...";
-      const reader = new FileReader();
-      reader.readAsText(file, "ISO-8859-1");
+  let tb=document.getElementById("tb");
+  tb.innerHTML="";
 
-      reader.onload = function (e) {
-        const text = e.target.result;
-        processCsv(text);
+  let fIni=ini;
+  let fFim=fim;
+
+  let filtrado=registros.filter(r=>r.agSort>=fIni && r.agSort<=fFim);
+
+  let mapa = {};
+  for(let r of filtrado){
+    if(!mapa[r.cns]){
+      mapa[r.cns]={
+        cns:r.cns,
+        nome:r.nome,
+        nasc:r.nasc,
+        idade:r.idade,
+        min:r.agSort,
+        max:r.agSort,
+        exames:1,
+        novo:false
       };
-
-      reader.onerror = function () {
-        statusEl.textContent = "Erro ao ler o arquivo.";
-      };
+    }else{
+      let o=mapa[r.cns];
+      o.exames++;
+      if(r.agSort<o.min) o.min=r.agSort;
+      if(r.agSort>o.max) o.max=r.agSort;
     }
+  }
 
-    function toTitleCase(str) {
-      return str
-        .toLowerCase()
-        .split(/\s+/)
-        .filter(Boolean)
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ");
-    }
-
-    function parseDateToSortKey(raw) {
-      if (!raw) return "";
-      const cleaned = raw.replace(/-/g, ".").replace(/\//g, ".");
-      const parts = cleaned.split(".");
-      if (parts.length !== 3) return "";
-      let [d, m, y] = parts;
-      d = d.padStart(2, "0");
-      m = m.padStart(2, "0");
-      if (y.length === 2) {
-        y = "20" + y;
-      }
-      return y + "-" + m + "-" + d;
-    }
-
-    function formatDob(dobRaw) {
-      if (!dobRaw) return "";
-      const cleaned = dobRaw.replace(/-/g, ".").replace(/\//g, ".");
-      const parts = cleaned.split(".");
-      if (parts.length !== 3) return "";
-      let [d, m, y] = parts;
-      d = d.padStart(2, "0");
-      m = m.padStart(2, "0");
-      if (y.length === 4) y = y.slice(2);
-      return d + "/" + m + "/" + y;
-    }
-
-    function formatSchedule(raw) {
-      if (!raw) return "";
-      const cleaned = raw.replace(/-/g, ".").replace(/\//g, ".");
-      const parts = cleaned.split(".");
-      if (parts.length !== 3) return "";
-      let [d, m, y] = parts;
-      d = d.padStart(2, "0");
-      m = m.padStart(2, "0");
-      if (y.length === 2) {
-        y = "20" + y;
-      }
-      return d + "/" + m + "/" + y;
-    }
-
-    function processCsv(text) {
-      resultBody.innerHTML = "";
-      allRows = [];
-      currentRows = [];
-      copyNamesBtn.disabled = true;
-
-      const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
-      const map = new Map();
-      const examCount = new Map();
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const parts = line.split(";");
-        if (parts.length < 13) continue;
-
-        const schedRaw = (parts[6] || "").trim();
-        const cns = (parts[9] || "").trim();
-        const nameRaw = (parts[10] || "").trim();
-        const dobRaw = (parts[11] || "").trim();
-        const ageStr = (parts[12] || "").trim();
-
-        // Ignorar cabeçalhos e linhas inválidas
-        if (!/^\d{15}$/.test(cns)) continue;
-        if (!nameRaw || nameRaw.toLowerCase() === "nome") continue;
-
-        let age = parseInt(ageStr, 10);
-        if (isNaN(age)) age = null;
-
-        const sortKeySched = parseDateToSortKey(schedRaw);
-
-        if (!map.has(cns)) {
-          map.set(cns, {
-            nameRaw,
-            age,
-            dobRaw,
-            schedRaw,
-            schedSort: sortKeySched
-          });
-        } else {
-          const obj = map.get(cns);
-          if (!obj.schedSort || (sortKeySched && sortKeySched < obj.schedSort)) {
-            obj.schedRaw = schedRaw;
-            obj.schedSort = sortKeySched;
-          }
-        }
-
-        examCount.set(cns, (examCount.get(cns) || 0) + 1);
-      }
-
-      const result = Array.from(map.entries()).map(([cns, info]) => {
-        const baseName = toTitleCase(info.nameRaw);
-        const dobSort = parseDateToSortKey(info.dobRaw);
-        const dobFormatted = formatDob(info.dobRaw);
-        const schedFormatted = formatSchedule(info.schedRaw);
-        return {
-          cns,
-          baseName,
-          age: info.age,
-          dobRaw: info.dobRaw,
-          dobSort,
-          dobFormatted,
-          schedRaw: info.schedRaw,
-          schedSort: info.schedSort,
-          schedFormatted,
-          exams: examCount.get(cns) || 0,
-          displayName: ""
-        };
-      });
-
-      const nameCount = {};
-      for (const row of result) {
-        const key = row.baseName;
-        nameCount[key] = (nameCount[key] || 0) + 1;
-      }
-
-      for (const row of result) {
-        let displayName = row.baseName;
-        if (nameCount[row.baseName] > 1) {
-          const dobFormatted = formatDob(row.dobRaw);
-          if (dobFormatted) {
-            displayName = displayName + " " + dobFormatted;
-          }
-        }
-        if (row.age !== null && row.age >= elderlyAge) {
-          displayName = displayName + "*";
-        }
-        row.displayName = displayName;
-      }
-
-      allRows = result;
-      currentSort = { column: "schedule", dir: "asc" };
-      renderTable();
-      if (allRows.length > 0) {
-        copyNamesBtn.disabled = false;
+  let novosNoPeriodo = new Set();
+  for(let r of filtrado){
+    if(!historicoChaves[r.chave]){
+      if(mapa[r.cns]) {
+        mapa[r.cns].novo=true;
+        novosNoPeriodo.add(r.cns);
       }
     }
+  }
 
-    function applyFilters(rows) {
-      const fCns = filterCns.value.trim().toLowerCase();
-      const fName = filterName.value.trim().toLowerCase();
-      const fAge = filterAge.value.trim().toLowerCase();
-      const fDob = filterDob.value.trim().toLowerCase();
-      const fSched = filterSchedule.value.trim().toLowerCase();
-      const fExams = filterExams.value.trim().toLowerCase();
+  for(let k in mapa){
+    let o=mapa[k];
+    let tr=document.createElement("tr");
+    if(o.novo) tr.classList.add("novo");
 
-      return rows.filter(r => {
-        if (fCns && !r.cns.toLowerCase().includes(fCns)) return false;
-        if (fName && !r.displayName.toLowerCase().includes(fName)) return false;
-        if (fAge && (r.age === null || !String(r.age).includes(fAge))) return false;
-        if (fDob && !r.dobFormatted.toLowerCase().includes(fDob)) return false;
-        if (fSched && !r.schedFormatted.toLowerCase().includes(fSched)) return false;
-        if (fExams && !String(r.exams).includes(fExams)) return false;
-        return true;
-      });
+    let nomeExib = o.nome;
+    if(o.idade>=60) nomeExib = nomeExib + "*";
+
+    tr.innerHTML =
+      "<td>"+o.cns+"</td>"+
+      "<td>"+nomeExib+"</td>"+
+      "<td>"+(o.idade||"")+"</td>"+
+      "<td>"+o.nasc+"</td>"+
+      "<td>"+toHuman(o.min)+"</td>"+
+      "<td>"+toHuman(o.max)+"</td>"+
+      "<td>"+o.exames+"</td>"+
+      "<td>"+(o.novo?"Sim":"")+"</td>";
+
+    tb.appendChild(tr);
+  }
+
+  for(let r of filtrado){
+    historicoChaves[r.chave]=true;
+  }
+  localStorage.setItem("historicoChaves",JSON.stringify(historicoChaves));
+
+  historicoIntervalos.push({
+    ini:ini,
+    fim:fim,
+    cns:Object.keys(mapa).length,
+    novos:novosNoPeriodo.size,
+    exames:filtrado.length
+  });
+  localStorage.setItem("historicoIntervalos",JSON.stringify(historicoIntervalos));
+  renderHistorico();
+  renderArmazenamento();
+
+  document.getElementById("copiarPeriodo").disabled=false;
+  document.getElementById("copiarNovos").disabled=false;
+});
+
+function renderHistorico(){
+  let h=document.getElementById("hist");
+  h.innerHTML="";
+  for(let i of historicoIntervalos){
+    let d=document.createElement("div");
+    d.textContent = i.ini+" a "+i.fim+" -> "+i.cns+" cns, "+i.exames+" exames, "+i.novos+" novos";
+    h.appendChild(d);
+  }
+}
+
+/* Mostrador de armazenamento */
+
+function calcLocalStorageUso(){
+  let totalBytes = 0;
+  let detalhes = [];
+
+  for(let i=0;i<localStorage.length;i++){
+    let k = localStorage.key(i);
+    let v = localStorage.getItem(k) || "";
+    let bytes = (k.length + v.length) * 2; // aprox 2 bytes por caractere
+    totalBytes += bytes;
+
+    if(k === "historicoChaves"){
+      let obj;
+      try{ obj = JSON.parse(v||"{}"); }catch(e){ obj = {}; }
+      let qtd = Object.keys(obj).length;
+      detalhes.push("historicoChaves: "+qtd+" chaves, ~"+Math.round(bytes/1024)+" KB");
+    }else if(k === "historicoIntervalos"){
+      let arr;
+      try{ arr = JSON.parse(v||"[]"); }catch(e){ arr = []; }
+      detalhes.push("historicoIntervalos: "+arr.length+" intervalos, ~"+Math.round(bytes/1024)+" KB");
+    }else{
+      detalhes.push(k+": ~"+Math.round(bytes/1024)+" KB");
     }
+  }
 
-    function sortRows(rows) {
-      const col = currentSort.column;
-      const dir = currentSort.dir === "asc" ? 1 : -1;
+  let totalKB = totalBytes/1024;
+  let totalMB = totalKB/1024;
 
-      return rows.slice().sort((a, b) => {
-        let va, vb;
+  return {
+    detalhes,
+    totalKB: totalKB,
+    totalMB: totalMB
+  };
+}
 
-        if (col === "cns") {
-          va = a.cns;
-          vb = b.cns;
-        } else if (col === "name") {
-          va = a.displayName;
-          vb = b.displayName;
-        } else if (col === "age") {
-          va = a.age === null ? -9999 : a.age;
-          vb = b.age === null ? -9999 : b.age;
-        } else if (col === "dob") {
-          va = a.dobSort || "";
-          vb = b.dobSort || "";
-        } else if (col === "schedule") {
-          va = a.schedSort || "";
-          vb = b.schedSort || "";
-        } else if (col === "exams") {
-          va = a.exams;
-          vb = b.exams;
-        } else {
-          va = "";
-          vb = "";
-        }
+function renderArmazenamento(){
+  let infoEl = document.getElementById("armaInfo");
+  let avisoEl = document.getElementById("armaAviso");
+  avisoEl.className = "";
+  let uso = calcLocalStorageUso();
 
-        if (va < vb) return -1 * dir;
-        if (va > vb) return 1 * dir;
-        return 0;
-      });
-    }
+  if(uso.detalhes.length === 0){
+    infoEl.textContent = "Nenhum dado salvo no localStorage ainda.";
+  }else{
+    infoEl.textContent = uso.detalhes.join("\n") +
+      "\nTotal aproximado: "+uso.totalMB.toFixed(2)+" MB";
+  }
 
-    function renderTable() {
-      resultBody.innerHTML = "";
+  let limiteMB = 5;          // valor típico por navegador
+  let alertaMB = 4;          // limite de alerta
+  let criticoMB = 4.5;       // limite crítico
 
-      document.querySelectorAll("thead .header-row th").forEach(th => {
-        th.classList.remove("sorted-asc", "sorted-desc");
-      });
-      const activeTh = document.querySelector(
-        'thead .header-row th[data-sort="' + currentSort.column + '"]'
-      );
-      if (activeTh) {
-        activeTh.classList.add(
-          currentSort.dir === "asc" ? "sorted-asc" : "sorted-desc"
-        );
-      }
+  if(uso.totalMB === 0){
+    avisoEl.textContent = "Armazenamento vazio.";
+    avisoEl.classList.add("ok");
+  }else if(uso.totalMB < alertaMB){
+    avisoEl.textContent = "Espaço confortável. Sem risco imediato.";
+    avisoEl.classList.add("ok");
+  }else if(uso.totalMB < criticoMB){
+    avisoEl.textContent = "Atenção: uso de armazenamento está alto. Considere limpar o histórico em breve.";
+    avisoEl.classList.add("alerta");
+  }else{
+    avisoEl.textContent = "Quase no limite estimado do navegador. Sugestão forte: limpar histórico para evitar erro de espaço.";
+    avisoEl.classList.add("critico");
+  }
+}
 
-      let rows = applyFilters(allRows);
-      rows = sortRows(rows);
-      currentRows = rows;
+renderHistorico();
+renderArmazenamento();
 
-      for (const row of rows) {
-        const tr = document.createElement("tr");
+document.getElementById("copiarPeriodo").addEventListener("click",()=>{
+  let linhas=[...document.querySelectorAll("#tb tr")];
+  let txt="";
+  for(let tr of linhas){
+    txt+=tr.children[1].innerText+"\n";
+  }
+  navigator.clipboard.writeText(txt);
+  alert("Copiado");
+});
 
-        const tdCns = document.createElement("td");
-        tdCns.textContent = row.cns;
-        tr.appendChild(tdCns);
+document.getElementById("copiarNovos").addEventListener("click",()=>{
+  let linhas=[...document.querySelectorAll("#tb tr.novo")];
+  let txt="";
+  for(let tr of linhas){
+    txt+=tr.children[1].innerText+"\n";
+  }
+  navigator.clipboard.writeText(txt);
+  alert("Novos copiados");
+});
 
-        const tdName = document.createElement("td");
-        tdName.textContent = row.displayName;
-        tr.appendChild(tdName);
+/* Botões do painel de armazenamento */
 
-        const tdAge = document.createElement("td");
-        tdAge.textContent = row.age !== null ? row.age : "";
-        tr.appendChild(tdAge);
+document.getElementById("btAtualizarArma").addEventListener("click",()=>{
+  renderArmazenamento();
+  alert("Informações de armazenamento atualizadas.");
+});
 
-        const tdDob = document.createElement("td");
-        tdDob.textContent = row.dobFormatted;
-        tr.appendChild(tdDob);
+document.getElementById("btLimparHistorico").addEventListener("click",()=>{
+  if(!confirm("Tem certeza que deseja limpar o histórico gravado (chaves e intervalos)?")) return;
+  historicoChaves = {};
+  historicoIntervalos = [];
+  localStorage.removeItem("historicoChaves");
+  localStorage.removeItem("historicoIntervalos");
+  document.getElementById("tb").innerHTML="";
+  document.getElementById("copiarPeriodo").disabled=true;
+  document.getElementById("copiarNovos").disabled=true;
+  renderHistorico();
+  renderArmazenamento();
+  alert("Histórico e chaves limpos.");
+});
+</script>
 
-        const tdSched = document.createElement("td");
-        tdSched.textContent = row.schedFormatted;
-        tr.appendChild(tdSched);
-
-        const tdExams = document.createElement("td");
-        tdExams.textContent = row.exams;
-        tr.appendChild(tdExams);
-
-        resultBody.appendChild(tr);
-      }
-
-      statusEl.textContent =
-        "Total de pacientes únicos: " +
-        allRows.length +
-        " | Exibidos: " +
-        rows.length;
-    }
-
-    function copyNames() {
-      if (!currentRows.length) {
-        alert("Nenhuma lista carregada.");
-        return;
-      }
-
-      // garante cada nome em uma linha ao colar em planilha
-      const names = currentRows.map(r => r.displayName).join("\r\n");
-
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(names)
-          .then(() => alert("Nomes copiados para a área de transferência."))
-          .catch(() => fallbackCopy(names));
-      } else {
-        fallbackCopy(names);
-      }
-    }
-
-    function fallbackCopy(text) {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.style.position = "fixed";
-      textarea.style.left = "-9999px";
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand("copy");
-        alert("Nomes copiados para a área de transferência.");
-      } catch (e) {
-        alert("Não foi possível copiar automaticamente. Selecione e copie manualmente.");
-      }
-      document.body.removeChild(textarea);
-    }
-  </script>
 </body>
 </html>
