@@ -1,0 +1,16 @@
+body{margin:0;font-family:Inter,Arial;background:#f5f7fb;color:#1a1a1a;padding:20px}
+.app-header{font-size:26px;font-weight:700;color:#005dff;margin-bottom:20px;text-align:center}
+.card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 3px 8px rgba(0,0,0,.08);margin-bottom:20px}
+.card h2{margin-top:0;color:#003e9b;font-size:18px;font-weight:600}
+input[type="file"],input[type="date"],input[type="text"]{padding:8px 10px;border:1px solid #c8d4e6;border-radius:8px;font-size:14px;margin:6px 0}
+button{padding:8px 14px;border-radius:8px;border:none;background:#005dff;color:white;font-weight:600;cursor:pointer;transition:.2s}
+button:hover{background:#0046c9}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px}
+th{background:#e8f0ff;cursor:pointer;color:#003e9b;text-align:left}
+tr:hover{background:#f4f7ff}
+#grafico{width:100%;height:320px}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);display:none;justify-content:center;align-items:center;padding:20px}
+.modal-content{background:#fff;padding:20px;border-radius:12px;max-width:520px;width:100%;max-height:80%;overflow:auto;box-shadow:0 6px 12px rgba(0,0,0,.2)}
+#listaNovos{margin-top:10px;line-height:1.5;font-size:14px;color:#333}
+#armazenamentoInfo{font-size:14px;color:#444;margin-top:8px;font-weight:500}
