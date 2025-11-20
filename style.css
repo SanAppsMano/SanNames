@@ -14,6 +14,7 @@ body{margin:0;font-family:Inter,Arial;background:#f5f7fb;color:#1a1a1a;padding:2
 .toggle-button{background:transparent;color:#003e9b;font-weight:600;padding:6px 14px;border-radius:999px;border:none;cursor:pointer;font-size:13px;transition:.2s}
 .toggle-button:hover{background:rgba(0,93,255,.12)}
 .toggle-button.ativo{background:#005dff;color:#fff;box-shadow:0 4px 10px rgba(0,93,255,.3)}
+.grafico-hint{margin:0 0 10px;color:#475569;font-size:13px}
 input[type="file"],input[type="date"],input[type="text"]{padding:8px 10px;border:1px solid #c8d4e6;border-radius:8px;font-size:14px;margin:6px 0}
 button{padding:8px 14px;border-radius:8px;border:none;background:#005dff;color:white;font-weight:600;cursor:pointer;transition:.2s}
 button:hover{background:#0046c9}
@@ -119,3 +120,8 @@ tr:hover{background:#f4f7ff}
 .chip:hover {
   background:#c7ddff;
 }
+
+.nomes-dia-actions{display:flex;justify-content:flex-end;margin-bottom:10px}
+.nomes-dia-list{max-height:320px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:#f8fafc;display:flex;flex-direction:column;gap:6px;font-size:14px;color:#0f172a}
+.nomes-dia-item{padding:4px 6px;border-bottom:1px solid #e2e8f0}
+.nomes-dia-item:last-child{border-bottom:none}
