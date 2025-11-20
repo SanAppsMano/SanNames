@@ -29,17 +29,21 @@ csvFile.addEventListener("change", () => {
 function parseCSV(txt) {
   const linhas = txt.trim().split(/\r?\n/);
   if (!linhas.length) return [];
+
   const rawHeader = linhas.shift().split(";");
   const header = rawHeader.map(h => h.trim().toLowerCase());
+
   const idx = {
     cns: findCol(header, ["cns"]),
-    nome: findCol(header, ["nome"]),
+    // 👉 nome do PACIENTE: tenta primeiro "nome" exato
+    nome: (header),
     nasc: findCol(header, ["dt_nascimento", "data_nascimento"]),
     data: findCol(header, ["data_agendamento", "dt_agendamento", "agendamento"]),
     exame: findCol(header, ["descricao_procedimento", "procedimento"]),
     solicitacao: findCol(header, ["numero_solicitacao", "solicitacao"]),
     codUnificado: findCol(header, ["codigo_unificado", "cod_unificado"])
   };
+
   return linhas.map(l => {
     const c = l.split(";");
     return {
