@@ -29,14 +29,12 @@ csvFile.addEventListener("change", () => {
 function parseCSV(txt) {
   const linhas = txt.trim().split(/\r?\n/);
   if (!linhas.length) return [];
-
   const rawHeader = linhas.shift().split(";");
   const header = rawHeader.map(h => h.trim().toLowerCase());
 
   const idx = {
     cns: findCol(header, ["cns"]),
-    // 👉 nome do PACIENTE: tenta primeiro "nome" exato
-    nome: (header),
+    nome: findNomePacienteCol(header),
     nasc: findCol(header, ["dt_nascimento", "data_nascimento"]),
     data: findCol(header, ["data_agendamento", "dt_agendamento", "agendamento"]),
     exame: findCol(header, ["descricao_procedimento", "procedimento"]),
@@ -56,6 +54,14 @@ function parseCSV(txt) {
       codUnificado: idx.codUnificado >= 0 ? (c[idx.codUnificado] || "") : ""
     };
   });
+}
+
+function findNomePacienteCol(header) {
+  let i = header.findIndex(h => h === "nome");
+  if (i >= 0) return i;
+  i = header.findIndex(h => h === "nome_paciente");
+  if (i >= 0) return i;
+  return findCol(header, ["nome"]);
 }
 
 function findCol(header, cand) {
@@ -109,10 +115,13 @@ function processar() {
   }
   ultimaDataInicio = iniStr;
   ultimaDataFim = fimStr;
+
   const d1 = new Date(iniStr + "T00:00:00");
   const d2 = new Date(fimStr + "T23:59:59");
+
   const mapa = {};
   registrosIntervalo = [];
+
   registros.forEach(r => {
     const dt = parseDataAgendamento(r.data);
     if (!dt) return;
@@ -131,7 +140,9 @@ function processar() {
       mapa[r.cns].dias[r.data] = true;
     }
   });
+
   const hoje = new Date();
+
   agregadosOrig = Object.values(mapa).map(x => {
     const idade = calcularIdade(x.nasc, hoje);
     const idoso = idade !== null && idade >= 60;
@@ -148,6 +159,7 @@ function processar() {
       presencas: Object.keys(x.dias).length
     };
   });
+
   filtrados = agregadosOrig.slice();
   detectarNovos();
   renderTabela();
@@ -192,6 +204,7 @@ campoPesquisa.oninput = () => {
 
 const ths = document.querySelectorAll("#tabelaPacientes th");
 const numericCols = new Set(["idade", "exames", "presencas"]);
+
 ths.forEach(th => {
   th.addEventListener("click", () => {
     const col = th.dataset.col;
@@ -211,10 +224,14 @@ function mostrarExames(cns) {
   const lista = registrosIntervalo.length
     ? registrosIntervalo.filter(x => x.cns === cns)
     : registros.filter(x => x.cns === cns);
+
   const paciente = agregadosOrig.find(x => x.cns === cns);
+
   modalContent.innerHTML = "";
+
   const headerDiv = document.createElement("div");
   headerDiv.className = "modal-header";
+
   const infoDiv = document.createElement("div");
   if (paciente) {
     const h2 = document.createElement("h2");
@@ -231,6 +248,7 @@ function mostrarExames(cns) {
     h2.textContent = "Exames";
     infoDiv.appendChild(h2);
   }
+
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "modal-close";
@@ -239,49 +257,63 @@ function mostrarExames(cns) {
     e.stopPropagation();
     fecharModal();
   };
+
   headerDiv.appendChild(infoDiv);
   headerDiv.appendChild(closeBtn);
   modalContent.appendChild(headerDiv);
+
   const listDiv = document.createElement("div");
   listDiv.className = "exam-list";
+
   lista.forEach(x => {
     const row = document.createElement("div");
     row.className = "exam-row";
+
     const info = document.createElement("div");
     info.className = "exam-info";
+
     const desc = document.createElement("div");
     desc.className = "exam-desc";
     desc.textContent = x.exame || "";
+
     const meta = document.createElement("div");
     meta.className = "exam-meta";
     meta.textContent =
       `Solicitação: ${x.solicitacao || "-"} • Código: ${x.codUnificado || "-"} • Data: ${x.data || ""}`;
+
     info.appendChild(desc);
     info.appendChild(meta);
+
     const actions = document.createElement("div");
     actions.className = "exam-actions";
+
     const b1 = document.createElement("button");
     b1.type = "button";
     b1.className = "chip";
     b1.textContent = "Solicitação";
     b1.onclick = () => copiarCampo(x.solicitacao || "", "Solicitação copiada");
+
     const b2 = document.createElement("button");
     b2.type = "button";
     b2.className = "chip";
     b2.textContent = "Código";
     b2.onclick = () => copiarCampo(x.codUnificado || "", "Código copiado");
+
     const b3 = document.createElement("button");
     b3.type = "button";
     b3.className = "chip";
     b3.textContent = "Descrição";
     b3.onclick = () => copiarCampo(x.exame || "", "Descrição copiada");
+
     actions.appendChild(b1);
     actions.appendChild(b2);
     actions.appendChild(b3);
+
     row.appendChild(info);
     row.appendChild(actions);
     listDiv.appendChild(row);
   });
+
   modalContent.appendChild(listDiv);
   modal.style.display = "flex";
 }
@@ -334,7 +366,7 @@ function detectarNovos() {
   novos = filtrados.filter(x => !antigos.has(x.cns));
   localStorage.setItem("ultimaLista", JSON.stringify(filtrados));
   const div = document.getElementById("listaNovos");
-  div.innerHTML = novos.map(x => x.nome).join("<br>");
+  if (div) div.innerHTML = novos.map(x => x.nome).join("<br>");
 }
 
 btnCopiarNovos.onclick = () => {
@@ -416,3 +448,32 @@ function renderHistorico(hist) {
   }
   renderHistorico(hist);
 })();
+
+function renderGrafico() {
+  const canvas = document.getElementById("grafico");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width = canvas.clientWidth || 600;
+  const h = canvas.height = canvas.clientHeight || 300;
+  ctx.clearRect(0, 0, w, h);
+  if (!registrosIntervalo.length) return;
+  const dias = {};
+  registrosIntervalo.forEach(r => {
+    const d = r.data || "";
+    dias[d] = (dias[d] || 0) + 1;
+  });
+  const labels = Object.keys(dias);
+  const valores = labels.map(d => dias[d]);
+  const max = Math.max(...valores, 1);
+  const barWidth = w / (labels.length || 1);
+  ctx.fillStyle = "#005dff";
+  ctx.font = "10px Arial";
+  ctx.textAlign = "center";
+  valores.forEach((v, i) => {
+    const x = i * barWidth + barWidth / 2;
+    const barH = (v / max) * (h - 40);
+    const y = h - 20 - barH;
+    ctx.fillRect(x - (barWidth * 0.5) * 0.6, y, barWidth * 0.6, barH);
+    ctx.fillText(labels[i], x, h - 8);
+  });
+}
