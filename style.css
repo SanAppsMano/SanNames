@@ -10,87 +10,26 @@ th,td{padding:10px;border-bottom:1px solid #e5e7eb;font-size:14px}
 th{background:#e8f0ff;cursor:pointer;color:#003e9b;text-align:left}
 tr:hover{background:#f4f7ff}
 #grafico{width:100%;height:320px}
-.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);display:none;justify-content:center;align-items:center;padding:20px}
-.modal-content{background:#fff;padding:20px;border-radius:12px;max-width:520px;width:100%;max-height:80%;overflow:auto;box-shadow:0 6px 12px rgba(0,0,0,.2)}
-#listaNovos{margin-top:10px;line-height:1.5;font-size:14px;color:#333}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.5);display:none;justify-content:center;align-items:center;padding:20px}
+.modal-content{background:#fff;padding:20px;border-radius:12px;max-width:800px;width:100%;max-height:80%;overflow:auto;box-shadow:0 6px 12px rgba(0,0,0,.2)}
+#listaNovos{margin-top:10px;line-height:1.5;font-size:14px;color:#333;max-height:220px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#f9fafb}
 #armazenamentoInfo{font-size:14px;color:#444;margin-top:8px;font-weight:500}
-.linha-selecionada {
-  background:#e0f2ff !important;
-}
 
-.modal-header {
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:12px;
-  margin-bottom:12px;
-}
+/* resto das classes já existentes no seu CSS original */
+.exam-list{margin-top:10px;border-top:1px solid #e5e7eb;padding-top:10px}
+.exam-item{padding:8px 0;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:flex-start}
+.exam-info{max-width:70%}
+.exam-title{font-weight:600;font-size:14px;margin-bottom:4px;color:#0f172a}
+.exam-meta{font-size:12px;color:#64748b}
+.exam-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.exam-actions button{font-size:12px;padding:6px 10px}
 
-.modal-header h2 {
-  margin:0 0 4px 0;
-  font-size:18px;
-  color:#0f172a;
-}
-
-.modal-header p {
-  margin:0;
-  font-size:13px;
-  color:#64748b;
-}
-
-.modal-close {
-  border:none;
-  background:transparent;
-  font-size:22px;
-  line-height:1;
-  cursor:pointer;
-  color:#64748b;
-}
-
-.modal-close:hover {
-  color:#0f172a;
-}
-
-.exam-list {
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-
-.exam-row {
-  display:flex;
-  justify-content:space-between;
-  gap:12px;
-  padding:10px 12px;
-  border-radius:10px;
-  background:#f8fafc;
-  border:1px solid #e2e8f0;
-}
-
-.exam-info {
-  flex:1;
-}
-
-.exam-desc {
-  font-weight:600;
-  margin-bottom:4px;
-  color:#0f172a;
-}
-
-.exam-meta {
-  font-size:12px;
-  color:#64748b;
-}
-
-.exam-actions {
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  align-items:flex-end;
-}
-
-.chip {
-  padding:4px 10px;
+.chip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:2px 8px;
+  margin:2px 4px 0 0;
   border-radius:999px;
   border:none;
   background:#e0ecff;
@@ -105,3 +44,4 @@ tr:hover{background:#f4f7ff}
   background:#c7ddff;
 }
 
+.tabela-scroll{max-height:420px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:10px;margin-top:12px}
