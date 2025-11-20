@@ -15,20 +15,17 @@ const modal = document.getElementById("modal");
 const modalContent = document.getElementById("modalContent");
 const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 
-// chave de storage para novos nomes e histórico
-const KEY_ULTIMA_LISTA = "ultimaLista";
+const KEY_CONHECIDOS = "sanNamesConhecidosCns";
 const KEY_HISTORICO = "historicoIntervalosSanNames";
 
-// Quando trocar de CSV, zera a memória de "novos"
 csvFile.addEventListener("change", () => {
   const f = csvFile.files[0];
   if (!f) return;
-
   const r = new FileReader();
   r.onload = e => {
     registros = parseCSV(e.target.result);
-    // reset de novos nomes para este arquivo
-    localStorage.removeItem(KEY_ULTIMA_LISTA);
+    // ao trocar o CSV, faz sentido poder recontar "novos" a partir deste arquivo
+    localStorage.removeItem(KEY_CONHECIDOS);
     const divNovos = document.getElementById("listaNovos");
     if (divNovos) divNovos.innerHTML = "";
     alert("CSV carregado");
@@ -36,11 +33,9 @@ csvFile.addEventListener("change", () => {
   r.readAsText(f, "UTF-8");
 });
 
-// -------- PARSE DO CSV --------
 function parseCSV(txt) {
   const linhas = txt.trim().split(/\r?\n/);
   if (!linhas.length) return [];
-
   const rawHeader = linhas.shift().split(";");
   const header = rawHeader.map(h => h.trim().toLowerCase());
 
@@ -68,36 +63,31 @@ function parseCSV(txt) {
   });
 }
 
-// nome do paciente: prioriza "nome" exato
 function findNomePacienteCol(header) {
   let i = header.findIndex(h => h === "nome");
   if (i >= 0) return i;
   i = header.findIndex(h => h === "nome_paciente");
   if (i >= 0) return i;
-  // fallback (evitar profissional_executante, mas último recurso)
   return findCol(header, ["nome"]);
 }
 
-// nascimento: qualquer coluna que pareça data de nascimento, evitando profissional
 function findNascCol(header) {
   let i = header.findIndex(h => h === "dt_nascimento");
   if (i >= 0) return i;
   i = header.findIndex(h => h === "data_nascimento");
   if (i >= 0) return i;
   i = header.findIndex(h => h.includes("nasc"));
-  return i; // pode ser -1, tratamos depois
+  return i;
 }
 
 function findCol(header, cand) {
   return header.findIndex(h => cand.some(name => h.includes(name)));
 }
 
-// -------- NORMALIZAÇÕES --------
 function normalizarNome(n) {
   return (n || "").toLowerCase().replace(/(?:^|\s)\S/g, m => m.toUpperCase());
 }
 
-// data_agendamento vem como dd.mm.aaaa (SISREG)
 function parseDataAgendamento(s) {
   if (!s) return null;
   const partes = s.split(".");
@@ -106,26 +96,18 @@ function parseDataAgendamento(s) {
   return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
 }
 
-// parse flexível de nascimento (vários formatos)
 function parseNascimento(nascStr) {
   if (!nascStr) return null;
   const s = nascStr.trim();
   let d, m, y;
 
-  // dd/mm/aa ou dd/mm/aaaa
   if (/^\d{2}\/\d{2}\/\d{2,4}$/.test(s)) {
     [d, m, y] = s.split("/");
-  }
-  // dd-mm-aaaa
-  else if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+  } else if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
     [d, m, y] = s.split("-");
-  }
-  // dd.mm.aaaa
-  else if (/^\d{2}\.\d{2}\.\d{4}$/.test(s)) {
+  } else if (/^\d{2}\.\d{2}\.\d{4}$/.test(s)) {
     [d, m, y] = s.split(".");
-  }
-  // aaaa-mm-dd
-  else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     [y, m, d] = s.split("-");
   } else {
     return null;
@@ -133,11 +115,9 @@ function parseNascimento(nascStr) {
 
   let year = parseInt(y, 10);
   if (isNaN(year)) return null;
-
   if (y.length === 2) {
     year = year >= 30 ? 1900 + year : 2000 + year;
   }
-
   const month = parseInt(m, 10) - 1;
   const day = parseInt(d, 10);
   const dt = new Date(year, month, day);
@@ -158,7 +138,6 @@ function calcularIdade(nascStr, hoje = new Date()) {
   return idade;
 }
 
-// -------- PROCESSAMENTO PRINCIPAL --------
 btnAplicar.onclick = () => processar();
 
 function processar() {
@@ -228,7 +207,6 @@ function processar() {
   salvarHistorico();
 }
 
-// -------- TABELA / BUSCA / ORDEM --------
 function renderTabela() {
   tabelaBody.innerHTML = "";
   filtrados.forEach(r => {
@@ -240,14 +218,12 @@ function renderTabela() {
       `<td>${r.idade}</td>` +
       `<td>${r.exames}</td>` +
       `<td>${r.presencas}</td>`;
-
     tr.onclick = () => {
       if (linhaSelecionada) linhaSelecionada.classList.remove("linha-selecionada");
       linhaSelecionada = tr;
       tr.classList.add("linha-selecionada");
       mostrarExames(r.cns);
     };
-
     tabelaBody.appendChild(tr);
   });
 }
@@ -283,7 +259,6 @@ ths.forEach(th => {
   });
 });
 
-// -------- MODAL DE EXAMES --------
 function mostrarExames(cns) {
   const lista = registrosIntervalo.length
     ? registrosIntervalo.filter(x => x.cns === cns)
@@ -419,17 +394,23 @@ modalContent.addEventListener("click", e => {
   e.stopPropagation();
 });
 
-// -------- NOVOS REGISTROS --------
 function detectarNovos() {
-  let last = [];
+  let conhecidosArr = [];
   try {
-    last = JSON.parse(localStorage.getItem(KEY_ULTIMA_LISTA) || "[]");
+    conhecidosArr = JSON.parse(localStorage.getItem(KEY_CONHECIDOS) || "[]");
   } catch (_) {
-    last = [];
+    conhecidosArr = [];
   }
-  const antigos = new Set(last.map(x => x.cns));
-  novos = filtrados.filter(x => !antigos.has(x.cns));
-  localStorage.setItem(KEY_ULTIMA_LISTA, JSON.stringify(filtrados));
+  const conhecidosSet = new Set(conhecidosArr);
+
+  novos = filtrados.filter(x => x.cns && !conhecidosSet.has(x.cns));
+
+  filtrados.forEach(x => {
+    if (x.cns) conhecidosSet.add(x.cns);
+  });
+
+  localStorage.setItem(KEY_CONHECIDOS, JSON.stringify(Array.from(conhecidosSet)));
+
   const div = document.getElementById("listaNovos");
   if (div) div.innerHTML = novos.map(x => x.nome).join("<br>");
 }
@@ -449,7 +430,6 @@ btnCopiarNovos.onclick = () => {
   }
 };
 
-// -------- ARMAZENAMENTO / HISTÓRICO / GRÁFICO --------
 function atualizarArmazenamento() {
   let usado = 0;
   try {
@@ -521,23 +501,34 @@ function renderGrafico() {
   const h = canvas.height = canvas.clientHeight || 300;
   ctx.clearRect(0, 0, w, h);
   if (!registrosIntervalo.length) return;
+
   const dias = {};
   registrosIntervalo.forEach(r => {
     const d = r.data || "";
     dias[d] = (dias[d] || 0) + 1;
   });
+
   const labels = Object.keys(dias);
   const valores = labels.map(d => dias[d]);
   const max = Math.max(...valores, 1);
   const barWidth = w / (labels.length || 1);
+
   ctx.fillStyle = "#005dff";
   ctx.font = "10px Arial";
   ctx.textAlign = "center";
+
   valores.forEach((v, i) => {
     const x = i * barWidth + barWidth / 2;
     const barH = (v / max) * (h - 40);
     const y = h - 20 - barH;
-    ctx.fillRect(x - (barWidth * 0.5) * 0.6, y, barWidth * 0.6, barH);
+    const larguraBarra = barWidth * 0.6;
+
+    ctx.fillRect(x - larguraBarra / 2, y, larguraBarra, barH);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.fillText(String(v), x, y - 4);
+
+    ctx.fillStyle = "#005dff";
     ctx.fillText(labels[i], x, h - 8);
   });
 }
