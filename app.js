@@ -9,6 +9,9 @@ let linhaSelecionada = null;
 let ultimoCnsIntervalo = new Set(); // usado para comparar com o intervalo anterior
 let graficoModo = "todos";
 let totalSolicitacoes = 0;
+let graficoBarras = [];
+let nomesPorDia = {};
+let agregadosPorCns = new Map();
 
 const csvFile = document.getElementById("csvFile");
 const campoPesquisa = document.getElementById("pesquisa");
@@ -22,6 +25,7 @@ const dataInicioInput = document.getElementById("dataInicio");
 const dataFimInput = document.getElementById("dataFim");
 const csvStatus = document.getElementById("csvStatus");
 const intervaloStatus = document.getElementById("intervaloStatus");
+const graficoCanvas = document.getElementById("grafico");
 
 const KEY_HISTORICO = "historicoIntervalosSanNames";
 
@@ -201,6 +205,15 @@ function atualizarStatusPill(el, texto, estado = "info") {
   el.dataset.status = estado;
 }
 
+function obterNomeParaRegistro(reg) {
+  if (reg.cns && agregadosPorCns.has(reg.cns)) {
+    return agregadosPorCns.get(reg.cns).nome;
+  }
+  const nomeBase = normalizarNome(reg.nome);
+  const nasc = formatarNascimentoCurto(reg.nasc);
+  return nasc ? `${nomeBase} ${nasc}` : nomeBase;
+}
+
 function ajustarNomesDuplicados(lista) {
   const grupos = new Map();
   lista.forEach(item => {
@@ -234,6 +247,10 @@ graficoModoBotoes.forEach(btn => {
     renderGrafico();
   });
 });
+
+if (graficoCanvas) {
+  graficoCanvas.addEventListener("click", onGraficoClick);
+}
 
 function validarIntervaloSelecionado() {
   if (!dataInicioInput || !dataFimInput) {
@@ -336,6 +353,11 @@ function processar(iniOverride, fimOverride) {
       dias: x.dias,
       presencas: Object.keys(x.dias).length
     };
+  });
+
+  agregadosPorCns = new Map();
+  agregadosOrig.forEach(item => {
+    if (item.cns) agregadosPorCns.set(item.cns, item);
   });
 
   filtrados = agregadosOrig.slice();
@@ -499,6 +521,55 @@ function mostrarExames(cns) {
   modal.style.display = "flex";
 }
 
+function mostrarNomesPorDia(diaLabel, nomes) {
+  modalContent.innerHTML = "";
+
+  const headerDiv = document.createElement("div");
+  headerDiv.className = "modal-header";
+
+  const infoDiv = document.createElement("div");
+  const h2 = document.createElement("h2");
+  h2.textContent = `Pacientes em ${diaLabel}`;
+  const p = document.createElement("p");
+  const plural = nomes.length === 1 ? "paciente" : "pacientes";
+  p.textContent = `${nomes.length} ${plural}`;
+  infoDiv.appendChild(h2);
+  infoDiv.appendChild(p);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "modal-close";
+  closeBtn.textContent = "×";
+  closeBtn.onclick = e => {
+    e.stopPropagation();
+    fecharModal();
+  };
+
+  headerDiv.appendChild(infoDiv);
+  headerDiv.appendChild(closeBtn);
+  modalContent.appendChild(headerDiv);
+
+  const actions = document.createElement("div");
+  actions.className = "nomes-dia-actions";
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.textContent = "Copiar nomes do dia";
+  copyBtn.onclick = () => copiarCampo(nomes.join("\n"), "Nomes do dia copiados");
+  actions.appendChild(copyBtn);
+  modalContent.appendChild(actions);
+
+  const listDiv = document.createElement("div");
+  listDiv.className = "nomes-dia-list";
+  nomes.forEach(nome => {
+    const item = document.createElement("div");
+    item.className = "nomes-dia-item";
+    item.textContent = nome;
+    listDiv.appendChild(item);
+  });
+  modalContent.appendChild(listDiv);
+  modal.style.display = "flex";
+}
+
 function copiarCampo(valor, msg) {
   const v = (valor || "").toString().trim();
   if (!v) {
@@ -526,6 +597,22 @@ function fecharModal() {
     linhaSelecionada.classList.remove("linha-selecionada");
     linhaSelecionada = null;
   }
+}
+
+function onGraficoClick(event) {
+  if (!graficoBarras.length) return;
+  const rect = event.currentTarget.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  if (y < 0 || y > event.currentTarget.height) return;
+  const barra = graficoBarras.find(b => x >= b.x1 && x <= b.x2);
+  if (!barra) return;
+  const nomes = nomesPorDia[barra.label] || [];
+  if (!nomes.length) {
+    alert("Nenhum paciente registrado neste dia");
+    return;
+  }
+  mostrarNomesPorDia(barra.label, nomes);
 }
 
 modal.onclick = () => fecharModal();
@@ -645,20 +732,32 @@ function renderGrafico() {
   const w = canvas.width = canvas.clientWidth || 600;
   const h = canvas.height = canvas.clientHeight || 320;
   ctx.clearRect(0, 0, w, h);
+  graficoBarras = [];
+  nomesPorDia = {};
   if (!registrosIntervalo.length) return;
 
   const dias = {};
   const pacientesPorDia = {};
+  const nomesPorDiaTemp = {};
   registrosIntervalo.forEach(r => {
     const d = r.data || "";
     dias[d] = (dias[d] || 0) + 1;
     if (!pacientesPorDia[d]) pacientesPorDia[d] = new Set();
     const key = r.cns || `${r.nome || ""}|${r.nasc || ""}`;
     pacientesPorDia[d].add(key);
+    if (!nomesPorDiaTemp[d]) nomesPorDiaTemp[d] = new Set();
+    nomesPorDiaTemp[d].add(obterNomeParaRegistro(r));
   });
 
   const labels = Object.keys(dias);
   if (!labels.length) return;
+
+  labels.forEach(label => {
+    const nomesSet = nomesPorDiaTemp[label];
+    nomesPorDia[label] = nomesSet
+      ? Array.from(nomesSet).sort((a, b) => a.localeCompare(b, "pt-BR"))
+      : [];
+  });
 
   const examesValores = labels.map(d => dias[d]);
   const pacientesValores = labels.map(d => (pacientesPorDia[d] ? pacientesPorDia[d].size : 0));
@@ -710,4 +809,10 @@ function renderGrafico() {
     const baseX = i * barWidth + barWidth / 2;
     ctx.fillText(label, baseX, h - 8);
   });
+
+  graficoBarras = labels.map((label, i) => ({
+    label,
+    x1: i * barWidth,
+    x2: (i + 1) * barWidth
+  }));
 }
