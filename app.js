@@ -9,12 +9,22 @@ let lastNewNames = [];
 let selectedRowEl = null;
 
 function normHeader(h) {
-  return h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "");
+  return h
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
+// aceita "dd/mm/aaaa", "dd/mm/aa" e com horário junto ("dd/mm/aaaa 00:00")
 function parseDateBR(str) {
   if (!str) return null;
-  const m = str.match(/^(\d{2})[\/.\-](\d{2})[\/.\-](\d{2,4})$/);
+  let s = String(str).trim();
+  // se vier "05/11/2025 00:00:00", pega só a parte da data
+  const spaceIdx = s.indexOf(" ");
+  if (spaceIdx > 0) s = s.slice(0, spaceIdx);
+
+  const m = s.match(/^(\d{2})[\/.\-](\d{2})[\/.\-](\d{2,4})$/);
   if (!m) return null;
   let d = parseInt(m[1], 10);
   let mo = parseInt(m[2], 10) - 1;
@@ -59,7 +69,13 @@ function calcAge(nasc, ref) {
 }
 
 function escapeHtml(str) {
-  return (str || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return (str || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
 }
 
 function setFileStatus(ok, msg) {
@@ -138,15 +154,27 @@ function parseCSV(text) {
   const headers = headerLine.split(delim).map(h => h.trim());
   const normHeaders = headers.map(normHeader);
 
-  const idx = { cns: -1, nome: -1, nasc: -1, idade: -1, ag: -1, qtd: -1, solicitacao: -1, codigo: -1, desc: -1 };
+  const idx = {
+    cns: -1,
+    nome: -1,
+    nasc: -1,
+    idade: -1,
+    ag: -1,
+    qtd: -1,
+    solicitacao: -1,
+    codigo: -1,
+    desc: -1
+  };
 
   normHeaders.forEach((n, i) => {
     if (n.includes("cns")) idx.cns = i;
     else if (n === "nome" || n.includes("nomepaciente")) idx.nome = i;
     else if (n.includes("nasc")) idx.nasc = i;
     else if (n.includes("idade")) idx.idade = i;
-    else if (n.includes("agend") || n.includes("dataatendimento")) idx.ag = i;
-    else if (n.includes("qtdeexames") || n.includes("qtd") || n.includes("quantidadeexames")) idx.qtd = i;
+    else if (n.includes("agend") || n.includes("dataatendimento") || n.includes("dataagendamento"))
+      idx.ag = i;
+    else if (n.includes("qtdeexames") || n.includes("qtd") || n.includes("quantidadeexames"))
+      idx.qtd = i;
     else if (n.includes("solicitacao")) idx.solicitacao = i;
     else if (n.includes("codigounificado") || n === "codunificado") idx.codigo = i;
     else if (n.includes("descricao") || n.includes("procedimento")) idx.desc = i;
@@ -156,10 +184,13 @@ function parseCSV(text) {
   for (let i = 1; i < lines.length; i++) {
     const parts = lines[i].split(delim);
     if (parts.length === 1 && parts[0].trim() === "") continue;
-    const get = index => (index >= 0 && index < parts.length ? parts[index].trim() : "");
+    const get = index =>
+      index >= 0 && index < parts.length ? parts[index].trim() : "";
+
     const cns = get(idx.cns);
     const nome = get(idx.nome);
     if (!cns && !nome) continue;
+
     const nascStr = get(idx.nasc);
     const nascDt = parseDateBR(nascStr);
     const idadeCsv = parseInt(get(idx.idade).replace(/\D/g, "")) || null;
@@ -167,6 +198,7 @@ function parseCSV(text) {
     const agDt = parseDateBR(agStr);
     let qtd = parseInt(get(idx.qtd).replace(/\D/g, "")) || 1;
     if (!Number.isFinite(qtd) || qtd <= 0) qtd = 1;
+
     rows.push({
       cns,
       nome,
@@ -185,7 +217,8 @@ function parseCSV(text) {
 }
 
 function computeMinMaxDates(rows) {
-  let min = null, max = null;
+  let min = null,
+    max = null;
   for (const r of rows) {
     if (!r.agDt) continue;
     if (!min || r.agDt < min) min = r.agDt;
@@ -194,10 +227,13 @@ function computeMinMaxDates(rows) {
   return { min, max };
 }
 
+// acrescenta dd/mm/aa antes do * quando houver nomes iguais com CNS diferente
 function disambiguateSameNames(patients) {
   const groups = new Map();
   for (const p of patients) {
-    const base = (p.baseName || p.displayName || "").replace(/\*+$/g, "").trim();
+    const base = (p.baseName || p.displayName || "")
+      .replace(/\*+$/g, "")
+      .trim();
     const key = base.toLowerCase();
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(p);
@@ -205,10 +241,13 @@ function disambiguateSameNames(patients) {
 
   for (const arr of groups.values()) {
     if (arr.length <= 1) continue;
+
     for (const p of arr) {
       const short = formatShortNasc(p.nascDt, p.nascStr);
       if (!short) continue;
-      const base = (p.baseName || p.displayName || "").replace(/\*+$/g, "").trim();
+      const base = (p.baseName || p.displayName || "")
+        .replace(/\*+$/g, "")
+        .trim();
       const hasStar = /\*$/.test(p.displayName || "");
       p.displayName = `${base} ${short}${hasStar ? "*" : ""}`;
     }
@@ -216,7 +255,17 @@ function disambiguateSameNames(patients) {
 }
 
 function buildPatientsForInterval(start, end) {
-  const rowsInInterval = allRows.filter(r => r.agDt && r.agDt >= start && r.agDt <= end);
+  // se houver datas válidas, filtra; se não houver nenhuma, usa tudo
+  const rowsWithDate = allRows.filter(r => r.agDt);
+  let rowsInInterval;
+  if (rowsWithDate.length === 0) {
+    rowsInInterval = allRows.slice();
+  } else {
+    rowsInInterval = rowsWithDate.filter(
+      r => r.agDt >= start && r.agDt <= end
+    );
+  }
+
   const map = new Map();
   for (const r of rowsInInterval) {
     const key = r.cns || r.nome;
@@ -253,9 +302,12 @@ function buildPatientsForInterval(start, end) {
     const refDate = end || new Date();
     const ageCalc = calcAge(g.nascDt, refDate);
     if (ageCalc != null) g.idade = ageCalc;
+
     const rawName = (g.nomeOriginal || "").trim();
     const hasStarOrig = /\*$/.test(rawName);
-    const baseName = hasStarOrig ? rawName.replace(/\*+$/g, "").trim() : rawName;
+    const baseName = hasStarOrig
+      ? rawName.replace(/\*+$/g, "").trim()
+      : rawName;
     const elderly = g.idade != null && g.idade >= 60;
     const finalStar = hasStarOrig || elderly;
     let finalName = baseName + (finalStar ? "*" : "");
@@ -331,22 +383,29 @@ function renderPatientsTable() {
   currentPatients.forEach((p, idx) => {
     const tr = document.createElement("tr");
     tr.dataset.index = String(idx);
+
     const tdCns = document.createElement("td");
     tdCns.textContent = p.cns;
+
     const tdNome = document.createElement("td");
     tdNome.textContent = p.displayName;
+
     const tdNasc = document.createElement("td");
     tdNasc.textContent = p.nascStr || "";
+
     const tdIdade = document.createElement("td");
     tdIdade.textContent = p.idade != null ? String(p.idade) : "";
+
     const tdEx = document.createElement("td");
     tdEx.textContent = String(p.totalExames);
     tdEx.classList.add("cell-exames");
     tdEx.style.color = "#005dff";
     tdEx.style.fontWeight = "600";
     tdEx.style.cursor = "pointer";
+
     const tdDias = document.createElement("td");
     tdDias.textContent = String(p.dias);
+
     tr.appendChild(tdCns);
     tr.appendChild(tdNome);
     tr.appendChild(tdNasc);
@@ -358,11 +417,16 @@ function renderPatientsTable() {
 }
 
 function applySearchAndSort() {
-  const term = document.getElementById("pesquisa").value.trim().toLowerCase();
+  const term = document.getElementById("pesquisa").value
+    .trim()
+    .toLowerCase();
+
   let list = basePatients.filter(p => {
     if (!term) return true;
-    return (p.cns && p.cns.toLowerCase().includes(term)) ||
-           (p.displayName && p.displayName.toLowerCase().includes(term));
+    return (
+      (p.cns && p.cns.toLowerCase().includes(term)) ||
+      (p.displayName && p.displayName.toLowerCase().includes(term))
+    );
   });
 
   if (sortState.col) {
@@ -375,7 +439,11 @@ function applySearchAndSort() {
       if (va == null) return 1;
       if (vb == null) return -1;
       if (col === "displayName" || col === "cns") {
-        return va.toString().localeCompare(vb.toString(), "pt-BR") * dir;
+        return (
+          va
+            .toString()
+            .localeCompare(vb.toString(), "pt-BR") * dir
+        );
       }
       return (va > vb ? 1 : va < vb ? -1 : 0) * dir;
     });
@@ -389,8 +457,8 @@ function drawChart(rows) {
   const canvas = document.getElementById("grafico");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const width = canvas.width = canvas.clientWidth || 600;
-  const height = canvas.height = canvas.clientHeight || 320;
+  const width = (canvas.width = canvas.clientWidth || 600);
+  const height = (canvas.height = canvas.clientHeight || 320);
   ctx.clearRect(0, 0, width, height);
 
   const map = new Map();
@@ -399,7 +467,11 @@ function drawChart(rows) {
     const t = r.agDt.getTime();
     let item = map.get(t);
     if (!item) {
-      item = { time: t, date: r.agStr || formatDateBR(r.agDt), total: 0 };
+      item = {
+        time: t,
+        date: r.agStr || formatDateBR(r.agDt),
+        total: 0
+      };
       map.set(t, item);
     }
     item.total += r.qtd || 1;
@@ -418,7 +490,10 @@ function drawChart(rows) {
   const chartH = height - margin.top - margin.bottom;
   const maxVal = Math.max(...days.map(d => d.total));
   const barW = Math.max(12, chartW / (days.length * 1.5));
-  const gap = days.length > 1 ? (chartW - barW * days.length) / (days.length - 1) : 0;
+  const gap =
+    days.length > 1
+      ? (chartW - barW * days.length) / (days.length - 1)
+      : 0;
 
   ctx.strokeStyle = "#cbd5f5";
   ctx.beginPath();
@@ -432,7 +507,7 @@ function drawChart(rows) {
 
   days.forEach((d, i) => {
     const x = margin.left + i * (barW + gap);
-    const h = maxVal ? (d.total / maxVal) * (chartH - 20) : 0;
+    const h = maxVal ? ((d.total / maxVal) * (chartH - 20)) : 0;
     const y = margin.top + chartH - h;
     ctx.fillStyle = "#005dff";
     ctx.fillRect(x, y, barW, h);
@@ -462,7 +537,9 @@ function openModalFor(index, rowEl) {
   let html = `<div class="modal-header">
       <div>
         <h2>${escapeHtml(p.displayName)}</h2>
-        <p>CNS ${escapeHtml(p.cns || "")} • ${p.rows.length} linhas • ${p.totalExames} exames</p>
+        <p>CNS ${escapeHtml(p.cns || "")} • ${p.rows.length} linhas • ${
+    p.totalExames
+  } exames</p>
       </div>
       <button type="button" class="modal-close">&times;</button>
     </div>
@@ -471,15 +548,25 @@ function openModalFor(index, rowEl) {
   p.rows.forEach(r => {
     html += `<div class="exam-row">
       <div class="exam-info">
-        <div class="exam-desc">${escapeHtml(r.descricao || "Exame sem descrição")}</div>
+        <div class="exam-desc">${escapeHtml(
+          r.descricao || "Exame sem descrição"
+        )}</div>
         <div class="exam-meta">
-          Solicitação: ${escapeHtml(r.solicitacao || "-")} • Código: ${escapeHtml(r.codigo || "-")} • Agendamento: ${escapeHtml(r.agStr || "")}
+          Solicitação: ${escapeHtml(r.solicitacao || "-")} • Código: ${escapeHtml(
+      r.codigo || "-"
+    )} • Agendamento: ${escapeHtml(r.agStr || "")}
         </div>
       </div>
       <div class="exam-actions">
-        <button class="chip" data-copy="${escapeHtml(r.solicitacao || "")}">Copiar solicitação</button>
-        <button class="chip" data-copy="${escapeHtml(r.codigo || "")}">Copiar código</button>
-        <button class="chip" data-copy="${escapeHtml(r.descricao || "")}">Copiar descrição</button>
+        <button class="chip" data-copy="${escapeHtml(
+          r.solicitacao || ""
+        )}">Copiar solicitação</button>
+        <button class="chip" data-copy="${escapeHtml(
+          r.codigo || ""
+        )}">Copiar código</button>
+        <button class="chip" data-copy="${escapeHtml(
+          r.descricao || ""
+        )}">Copiar descrição</button>
       </div>
     </div>`;
   });
@@ -632,11 +719,14 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(txt).then(() => {
-          alert("Copiado para a área de transferência.");
-        }).catch(() => {
-          alert("Não foi possível copiar.");
-        });
+        navigator.clipboard
+          .writeText(txt)
+          .then(() => {
+            alert("Copiado para a área de transferência.");
+          })
+          .catch(() => {
+            alert("Não foi possível copiar.");
+          });
       } else {
         alert("Seu navegador não suporta cópia automática.");
       }
@@ -650,11 +740,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const txt = lastNewNames.join("\n");
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(() => {
-        alert("Novos nomes copiados para a área de transferência.");
-      }).catch(() => {
-        alert("Não foi possível copiar.");
-      });
+      navigator.clipboard
+        .writeText(txt)
+        .then(() => {
+          alert("Novos nomes copiados para a área de transferência.");
+        })
+        .catch(() => {
+          alert("Não foi possível copiar.");
+        });
     } else {
       alert("Seu navegador não suporta cópia automática.");
     }
@@ -665,7 +758,12 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Nenhum arquivo carregado.");
       return;
     }
-    if (!confirm("Limpar histórico e marcar todos os registros como novos novamente?")) return;
+    if (
+      !confirm(
+        "Limpar histórico e marcar todos os registros como novos novamente?"
+      )
+    )
+      return;
     historyEntries = [];
     renderHistory();
     const sk = getSeenKey();
