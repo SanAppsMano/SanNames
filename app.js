@@ -8,9 +8,9 @@ let ultimaDataFim = null;
 let linhaSelecionada = null;
 let ultimoCnsIntervalo = new Set(); // usado para comparar com o intervalo anterior
 let graficoModo = "todos";
+let totalSolicitacoes = 0;
 
 const csvFile = document.getElementById("csvFile");
-const btnAplicar = document.getElementById("btnAplicar");
 const campoPesquisa = document.getElementById("pesquisa");
 const tabelaBody = document.querySelector("#tabelaPacientes tbody");
 const modal = document.getElementById("modal");
@@ -18,27 +18,56 @@ const modalContent = document.getElementById("modalContent");
 const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 const btnLimparHistorico = document.getElementById("btnLimparHistorico");
 const graficoModoBotoes = document.querySelectorAll("[data-grafico-modo]");
+const dataInicioInput = document.getElementById("dataInicio");
+const dataFimInput = document.getElementById("dataFim");
+const csvStatus = document.getElementById("csvStatus");
+const intervaloStatus = document.getElementById("intervaloStatus");
 
 const KEY_HISTORICO = "historicoIntervalosSanNames";
 
 csvFile.addEventListener("change", () => {
   const f = csvFile.files[0];
-  if (!f) return;
+  if (!f) {
+    registros = [];
+    atualizarStatusPill(csvStatus, "Nenhum arquivo selecionado", "muted");
+    return;
+  }
+  atualizarStatusPill(csvStatus, "Processando arquivo...", "info");
   const r = new FileReader();
   r.onload = e => {
-    registros = parseCSV(e.target.result);
-    // ao trocar o CSV, zera o intervalo anterior e limpa novos
-    ultimoCnsIntervalo = new Set();
-    const divNovos = document.getElementById("listaNovos");
-    if (divNovos) divNovos.innerHTML = "";
-    alert("CSV carregado");
+    try {
+      registros = parseCSV(e.target.result);
+      agregadosOrig = [];
+      filtrados = [];
+      registrosIntervalo = [];
+      ultimoCnsIntervalo = new Set();
+      novos = [];
+      const divNovos = document.getElementById("listaNovos");
+      if (divNovos) divNovos.innerHTML = "Nenhum intervalo aplicado ainda";
+      const spanNovos = document.getElementById("novosTotal");
+      if (spanNovos) spanNovos.innerText = "(0)";
+      if (tabelaBody) tabelaBody.innerHTML = "";
+      renderGrafico();
+      atualizarStatusPill(csvStatus, `Arquivo válido (${f.name})`, "ok");
+      tentarAplicarIntervalo();
+    } catch (err) {
+      registros = [];
+      atualizarStatusPill(csvStatus, err.message || "CSV inválido", "erro");
+    }
+  };
+  r.onerror = () => {
+    registros = [];
+    atualizarStatusPill(csvStatus, "Não foi possível ler o arquivo", "erro");
   };
   r.readAsText(f, "UTF-8");
 });
 
 function parseCSV(txt) {
-  const linhas = txt.trim().split(/\r?\n/);
-  if (!linhas.length) return [];
+  const conteudo = txt.trim();
+  if (!conteudo) {
+    throw new Error("Arquivo vazio ou inválido");
+  }
+  const linhas = conteudo.split(/\r?\n/);
   const rawHeader = linhas.shift().split(";");
   const header = rawHeader.map(h => h.trim().toLowerCase());
 
@@ -51,6 +80,15 @@ function parseCSV(txt) {
     solicitacao: findCol(header, ["numero_solicitacao", "solicitacao"]),
     codUnificado: findCol(header, ["codigo_unificado", "cod_unificado"])
   };
+
+  const faltantes = [];
+  if (idx.cns < 0) faltantes.push("CNS");
+  if (idx.nome < 0) faltantes.push("Nome do paciente");
+  if (idx.data < 0) faltantes.push("Data de agendamento");
+  if (idx.exame < 0) faltantes.push("Procedimento");
+  if (faltantes.length) {
+    throw new Error(`CSV inválido. Colunas ausentes: ${faltantes.join(", ")}`);
+  }
 
   return linhas.map(l => {
     const c = l.split(";");
@@ -150,6 +188,19 @@ function formatarNascimentoCurto(nascStr) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function formatarDataInterface(dataStr) {
+  if (!dataStr) return "";
+  const [ano, mes, dia] = dataStr.split("-");
+  if (!ano || !mes || !dia) return dataStr;
+  return `${dia}/${mes}/${ano}`;
+}
+
+function atualizarStatusPill(el, texto, estado = "info") {
+  if (!el) return;
+  el.textContent = texto;
+  el.dataset.status = estado;
+}
+
 function ajustarNomesDuplicados(lista) {
   const grupos = new Map();
   lista.forEach(item => {
@@ -169,8 +220,12 @@ function ajustarNomesDuplicados(lista) {
   });
 }
 
-btnAplicar.onclick = () => processar();
 if (btnLimparHistorico) btnLimparHistorico.onclick = () => limparHistorico();
+
+[dataInicioInput, dataFimInput].forEach(campo => {
+  if (!campo) return;
+  campo.addEventListener("change", () => tentarAplicarIntervalo());
+});
 
 graficoModoBotoes.forEach(btn => {
   btn.addEventListener("click", () => {
@@ -180,17 +235,55 @@ graficoModoBotoes.forEach(btn => {
   });
 });
 
-function processar() {
-  if (!registros.length) {
-    alert("Carregue um CSV primeiro");
-    return;
+function validarIntervaloSelecionado() {
+  if (!dataInicioInput || !dataFimInput) {
+    return { ok: false, mensagem: "Campos de data indisponíveis", estado: "erro" };
   }
-  const iniStr = document.getElementById("dataInicio").value;
-  const fimStr = document.getElementById("dataFim").value;
+  const iniStr = dataInicioInput.value;
+  const fimStr = dataFimInput.value;
   if (!iniStr || !fimStr) {
-    alert("Selecione o intervalo de datas");
-    return;
+    return { ok: false, mensagem: "Selecione as duas datas", estado: "muted" };
   }
+  const inicio = new Date(`${iniStr}T00:00:00`);
+  const fim = new Date(`${fimStr}T23:59:59`);
+  if (isNaN(inicio) || isNaN(fim)) {
+    return { ok: false, mensagem: "Datas inválidas", estado: "erro" };
+  }
+  if (inicio > fim) {
+    return { ok: false, mensagem: "Data inicial maior que a final", estado: "erro" };
+  }
+  return { ok: true, iniStr, fimStr };
+}
+
+function tentarAplicarIntervalo() {
+  if (!intervaloStatus) return false;
+  const validacao = validarIntervaloSelecionado();
+  if (!validacao.ok) {
+    atualizarStatusPill(intervaloStatus, validacao.mensagem, validacao.estado);
+    return false;
+  }
+  if (!registros.length) {
+    atualizarStatusPill(intervaloStatus, "Carregue um CSV válido", "alert");
+    return false;
+  }
+  atualizarStatusPill(intervaloStatus, "Aplicando intervalo...", "info");
+  const sucesso = processar(validacao.iniStr, validacao.fimStr);
+  if (sucesso) {
+    const textoBase = registrosIntervalo.length
+      ? `Intervalo aplicado (${formatarDataInterface(validacao.iniStr)} a ${formatarDataInterface(validacao.fimStr)})`
+      : `Intervalo sem registros (${formatarDataInterface(validacao.iniStr)} a ${formatarDataInterface(validacao.fimStr)})`;
+    atualizarStatusPill(intervaloStatus, textoBase, registrosIntervalo.length ? "ok" : "alert");
+  } else {
+    atualizarStatusPill(intervaloStatus, "Não foi possível aplicar o intervalo", "erro");
+  }
+  return sucesso;
+}
+
+function processar(iniOverride, fimOverride) {
+  if (!registros.length) return false;
+  const iniStr = iniOverride ?? (dataInicioInput ? dataInicioInput.value : "");
+  const fimStr = fimOverride ?? (dataFimInput ? dataFimInput.value : "");
+  if (!iniStr || !fimStr) return false;
 
   ultimaDataInicio = iniStr;
   ultimaDataFim = fimStr;
@@ -200,6 +293,7 @@ function processar() {
 
   const mapa = {};
   registrosIntervalo = [];
+  const solicitacoesSet = new Set();
 
   registros.forEach(r => {
     const dt = parseDataAgendamento(r.data);
@@ -217,8 +311,13 @@ function processar() {
       }
       mapa[r.cns].exames += 1;
       mapa[r.cns].dias[r.data] = true;
+      if (r.solicitacao) {
+        solicitacoesSet.add((r.solicitacao || "").trim());
+      }
     }
   });
+
+  totalSolicitacoes = solicitacoesSet.size;
 
   const hoje = new Date();
 
@@ -246,6 +345,7 @@ function processar() {
   renderGrafico();
   atualizarArmazenamento();
   salvarHistorico();
+  return true;
 }
 
 function renderTabela() {
@@ -493,6 +593,7 @@ function salvarHistorico() {
     fim: ultimaDataFim,
     totalPacientes,
     totalExames,
+    totalSolicitacoes,
     ts: new Date().toISOString()
   };
   const jaExiste = hist.some(h => h.inicio === reg.inicio && h.fim === reg.fim);
@@ -518,7 +619,10 @@ function renderHistorico(hist) {
   }
   let html = "<ul>";
   hist.slice().reverse().forEach(h => {
-    html += `<li>${h.inicio} até ${h.fim} - ${h.totalPacientes} pacientes, ${h.totalExames} exames</li>`;
+    const solicitacoesTxt = typeof h.totalSolicitacoes === "number"
+      ? `, ${h.totalSolicitacoes} solicitações`
+      : "";
+    html += `<li>${h.inicio} até ${h.fim} - ${h.totalPacientes} pacientes, ${h.totalExames} exames${solicitacoesTxt}</li>`;
   });
   html += "</ul>";
   div.innerHTML = html;
