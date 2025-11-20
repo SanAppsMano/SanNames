@@ -45,3 +45,20 @@ tr:hover{background:#f4f7ff}
 }
 
 .tabela-scroll{max-height:420px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:10px;margin-top:12px}
+#tabelaPacientes{
+  width:100%;
+  border-collapse:collapse;
+}
+
+#tabelaPacientes thead,
+#tabelaPacientes tbody tr{
+  display:table;
+  width:100%;
+  table-layout:fixed;
+}
+
+#tabelaPacientes tbody{
+  display:block;
+  max-height:420px;
+  overflow-y:auto;
+}
