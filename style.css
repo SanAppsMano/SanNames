@@ -2,6 +2,13 @@ body{margin:0;font-family:Inter,Arial;background:#f5f7fb;color:#1a1a1a;padding:2
 .app-header{font-size:26px;font-weight:700;color:#005dff;margin-bottom:20px;text-align:center}
 .card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 3px 8px rgba(0,0,0,.08);margin-bottom:20px}
 .card h2{margin-top:0;color:#003e9b;font-size:18px;font-weight:600}
+.upload-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.status-pill{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:600;background:#e2e8f0;color:#475569;min-height:34px}
+.status-pill[data-status="info"]{background:#dbeafe;color:#1d4ed8}
+.status-pill[data-status="ok"]{background:#dcfce7;color:#166534}
+.status-pill[data-status="erro"]{background:#fee2e2;color:#b91c1c}
+.status-pill[data-status="alert"]{background:#fef3c7;color:#92400e}
+.status-pill[data-status="muted"]{background:#e2e8f0;color:#475569}
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .toggle-group{display:flex;gap:6px;background:#e8f0ff;padding:4px;border-radius:999px}
 .toggle-button{background:transparent;color:#003e9b;font-weight:600;padding:6px 14px;border-radius:999px;border:none;cursor:pointer;font-size:13px;transition:.2s}
