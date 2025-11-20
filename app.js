@@ -762,9 +762,18 @@ function atualizarArmazenamento() {
     usado = 0;
   }
   const max = 5 * 1024 * 1024;
-  const pct = ((usado / max) * 100).toFixed(1);
+  const pctNum = (usado / max) * 100;
+  const pct = pctNum.toFixed(1);
   const el = document.getElementById("armazenamentoInfo");
-  if (el) el.innerText = `Uso estimado do localStorage: ${pct}%`;
+  if (el) {
+    let msg = `Uso estimado do localStorage: ${pct}%`;
+    if (pctNum >= 90) {
+      msg += " — Atenção: muito cheio, exporte/limpe o banco para evitar falhas.";
+    } else if (pctNum >= 80) {
+      msg += " — Aviso: próximo do limite, considere baixar e limpar o banco.";
+    }
+    el.innerText = msg;
+  }
 }
 
 function salvarHistorico() {
