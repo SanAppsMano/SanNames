@@ -16,31 +16,25 @@
   <!-- Card: Carregar CSV -->
   <section class="card">
     <h2>Carregar CSV</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-      <label>
-        <input id="csvFile" type="file" accept=".csv" />
-      </label>
-      <span style="font-size:14px;color:#555;">
-        Use o arquivo exportado do sistema SUS
-      </span>
-    </div>
+    <input id="csvFile" type="file" accept=".csv" />
 
-    <!-- Status do arquivo -->
-    <div id="fileStatus" class="alert-error" style="display:none;">
-      Nenhum arquivo carregado ainda
+    <div style="margin-top:12px;font-size:13px;color:#555">
+      O arquivo deve conter, no mínimo, as colunas de CNS, Nome, Data de nascimento,
+      Data de agendamento e Exame/Procedimento.
     </div>
   </section>
 
   <!-- Card: Intervalo de datas -->
   <section class="card">
-    <h2>Intervalo de datas</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <h2>Intervalo de datas para análise</h2>
+
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
       <div>
-        <label for="dataInicio">De</label><br/>
+        <label for="dataInicio">Data inicial</label><br />
         <input id="dataInicio" type="date" />
       </div>
       <div>
-        <label for="dataFim">Até</label><br/>
+        <label for="dataFim">Data final</label><br />
         <input id="dataFim" type="date" />
       </div>
       <div style="margin-top:22px">
@@ -57,10 +51,11 @@
     <input
       id="pesquisa"
       type="text"
-      placeholder="Pesquisar por nome ou CNS"
+      placeholder="Filtrar por nome ou CNS"
       style="width:100%;max-width:320px"
     />
 
+    <div class="tabela-scroll">
     <table id="tabelaPacientes">
       <thead>
         <tr>
@@ -74,6 +69,7 @@
       </thead>
       <tbody></tbody>
     </table>
+    </div>
   </section>
 
   <!-- Card: Novos nomes -->
@@ -101,27 +97,17 @@
   <!-- Card: Histórico e armazenamento -->
   <section class="card">
     <h2>Histórico de intervalos</h2>
+    <div id="historico"></div>
 
-    <div style="margin-bottom:8px">
-      <button id="btnLimparHistorico" type="button">
-        Limpar histórico
-      </button>
-    </div>
-
-    <div id="historico">
-      Nenhum intervalo salvo ainda
-    </div>
-
-    <div id="armazenamentoInfo">
-      Uso estimado do localStorage: 0%
+    <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button id="btnLimparHistorico" type="button">Limpar histórico</button>
+      <span id="armazenamentoInfo"></span>
     </div>
   </section>
 
-  <!-- Modal de exames -->
+  <!-- Modal de detalhes -->
   <div id="modal" class="modal">
-    <div class="modal-content" id="modalContent">
-      <!-- Conteúdo preenchido via JS -->
-    </div>
+    <div class="modal-content" id="modalContent"></div>
   </div>
 
   <script src="app.js"></script>
