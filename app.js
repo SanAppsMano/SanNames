@@ -265,6 +265,7 @@ campoPesquisa.oninput = () => {
     filtrados = agregadosOrig.slice();
   } else {
     filtrados = agregadosOrig.filter(x =>
+      (x.nome || "").toLowerCase().includes(q) ||
       x.nomeBase.toLowerCase().includes(q) ||
       (x.cns || "").includes(q)
     );
