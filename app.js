@@ -6,6 +6,7 @@ let registrosIntervalo = [];
 let ultimaDataInicio = null;
 let ultimaDataFim = null;
 let linhaSelecionada = null;
+let ultimoCnsIntervalo = new Set(); // usado para comparar com o intervalo anterior
 
 const csvFile = document.getElementById("csvFile");
 const btnAplicar = document.getElementById("btnAplicar");
@@ -14,8 +15,8 @@ const tabelaBody = document.querySelector("#tabelaPacientes tbody");
 const modal = document.getElementById("modal");
 const modalContent = document.getElementById("modalContent");
 const btnCopiarNovos = document.getElementById("btnCopiarNovos");
+const btnLimparHistorico = document.getElementById("btnLimparHistorico");
 
-const KEY_CONHECIDOS = "sanNamesConhecidosCns";
 const KEY_HISTORICO = "historicoIntervalosSanNames";
 
 csvFile.addEventListener("change", () => {
@@ -24,8 +25,8 @@ csvFile.addEventListener("change", () => {
   const r = new FileReader();
   r.onload = e => {
     registros = parseCSV(e.target.result);
-    // ao trocar o CSV, faz sentido poder recontar "novos" a partir deste arquivo
-    localStorage.removeItem(KEY_CONHECIDOS);
+    // ao trocar o CSV, zera o intervalo anterior e limpa novos
+    ultimoCnsIntervalo = new Set();
     const divNovos = document.getElementById("listaNovos");
     if (divNovos) divNovos.innerHTML = "";
     alert("CSV carregado");
@@ -139,6 +140,7 @@ function calcularIdade(nascStr, hoje = new Date()) {
 }
 
 btnAplicar.onclick = () => processar();
+if (btnLimparHistorico) btnLimparHistorico.onclick = () => limparHistorico();
 
 function processar() {
   if (!registros.length) {
@@ -386,30 +388,18 @@ function fecharModal() {
   }
 }
 
-modal.onclick = () => {
-  fecharModal();
-};
-
-modalContent.addEventListener("click", e => {
-  e.stopPropagation();
-});
+modal.onclick = () => fecharModal();
+modalContent.addEventListener("click", e => e.stopPropagation());
 
 function detectarNovos() {
-  let conhecidosArr = [];
-  try {
-    conhecidosArr = JSON.parse(localStorage.getItem(KEY_CONHECIDOS) || "[]");
-  } catch (_) {
-    conhecidosArr = [];
-  }
-  const conhecidosSet = new Set(conhecidosArr);
+  // novos em relação ao intervalo anterior
+  const atualSet = new Set(
+    filtrados.map(x => x.cns).filter(Boolean)
+  );
 
-  novos = filtrados.filter(x => x.cns && !conhecidosSet.has(x.cns));
+  novos = filtrados.filter(x => x.cns && !ultimoCnsIntervalo.has(x.cns));
 
-  filtrados.forEach(x => {
-    if (x.cns) conhecidosSet.add(x.cns);
-  });
-
-  localStorage.setItem(KEY_CONHECIDOS, JSON.stringify(Array.from(conhecidosSet)));
+  ultimoCnsIntervalo = atualSet;
 
   const div = document.getElementById("listaNovos");
   if (div) div.innerHTML = novos.map(x => x.nome).join("<br>");
@@ -468,6 +458,11 @@ function salvarHistorico() {
   renderHistorico(hist);
 }
 
+function limparHistorico() {
+  localStorage.removeItem(KEY_HISTORICO);
+  renderHistorico([]);
+}
+
 function renderHistorico(hist) {
   const div = document.getElementById("historico");
   if (!div) return;
@@ -513,7 +508,6 @@ function renderGrafico() {
   const max = Math.max(...valores, 1);
   const barWidth = w / (labels.length || 1);
 
-  ctx.fillStyle = "#005dff";
   ctx.font = "10px Arial";
   ctx.textAlign = "center";
 
@@ -523,12 +517,11 @@ function renderGrafico() {
     const y = h - 20 - barH;
     const larguraBarra = barWidth * 0.6;
 
+    ctx.fillStyle = "#005dff";
     ctx.fillRect(x - larguraBarra / 2, y, larguraBarra, barH);
 
     ctx.fillStyle = "#0f172a";
-    ctx.fillText(String(v), x, y - 4);
-
-    ctx.fillStyle = "#005dff";
-    ctx.fillText(labels[i], x, h - 8);
+    ctx.fillText(String(v), x, y - 4);        // número de exames
+    ctx.fillText(labels[i], x, h - 8);        // data
   });
 }
