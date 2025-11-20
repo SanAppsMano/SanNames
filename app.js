@@ -14,43 +14,45 @@ const campoPesquisa = document.getElementById("pesquisa");
 const tabelaBody = document.querySelector("#tabelaPacientes tbody");
 const modal = document.getElementById("modal");
 const modalContent = document.getElementById("modalContent");
-const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 const btnLimparHistorico = document.getElementById("btnLimparHistorico");
-
+const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 const KEY_HISTORICO = "historicoIntervalosSanNames";
 
 csvFile.addEventListener("change", () => {
-  const f = csvFile.files[0];
-  if (!f) return;
-  const r = new FileReader();
-  r.onload = e => {
-    registros = parseCSV(e.target.result);
-    // ao trocar o CSV, zera o intervalo anterior e limpa novos
-    ultimoCnsIntervalo = new Set();
-    const divNovos = document.getElementById("listaNovos");
-    if (divNovos) divNovos.innerHTML = "";
-    alert("CSV carregado");
+  const file = csvFile.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const txt = e.target.result;
+    processarCSV(txt);
   };
-  r.readAsText(f, "UTF-8");
+  reader.readAsText(file, "utf-8");
 });
 
-function parseCSV(txt) {
+function processarCSV(txt) {
   const linhas = txt.trim().split(/\r?\n/);
-  if (!linhas.length) return [];
-  const rawHeader = linhas.shift().split(";");
-  const header = rawHeader.map(h => h.trim().toLowerCase());
-
+  if (!linhas.length) {
+    alert("CSV vazio");
+    return;
+  }
+  const header = linhas[0].split(";").map(h => h.trim().toLowerCase());
   const idx = {
-    cns: findCol(header, ["cns"]),
-    nome: findNomePacienteCol(header),
-    nasc: findNascCol(header),
-    data: findCol(header, ["data_agendamento", "dt_agendamento", "agendamento"]),
-    exame: findCol(header, ["descricao_procedimento", "procedimento"]),
-    solicitacao: findCol(header, ["numero_solicitacao", "solicitacao"]),
-    codUnificado: findCol(header, ["codigo_unificado", "cod_unificado"])
+    cns: findCol(header, ["cns", "numero_cartao_sus", "num_cns", "cartao_sus"]),
+    nome: findCol(header, ["nome", "nome_paciente", "nome_usuario"]),
+    nasc: findColNasc(header),
+    data: findCol(header, ["dt_agendamento", "data_agendamento", "data", "dt_atendimento"]),
+    exame: findCol(header, ["descricao_procedimento", "procedimento", "exame", "descricao_exame"]),
+    solicitacao: findCol(header, ["numero_solicitacao", "num_solicitacao", "nr_solicitacao", "solicitacao"])
   };
 
-  return linhas.map(l => {
+  const obrig = ["cns", "nome", "data", "exame"];
+  const faltando = obrig.filter(k => idx[k] < 0);
+  if (faltando.length) {
+    alert("Não foi possível localizar colunas obrigatórias: " + faltando.join(", "));
+    return;
+  }
+
+  registros = linhas.slice(1).map(l => {
     const c = l.split(";");
     return {
       cns: c[idx.cns] || "",
@@ -59,42 +61,69 @@ function parseCSV(txt) {
       data: c[idx.data] || "",
       exame: c[idx.exame] || "",
       solicitacao: idx.solicitacao >= 0 ? (c[idx.solicitacao] || "") : "",
-      codUnificado: idx.codUnificado >= 0 ? (c[idx.codUnificado] || "") : ""
+      linha: l
     };
-  });
+  }).filter(r => r.cns && r.nome && r.data && r.exame);
+
+  if (!registros.length) {
+    alert("Nenhum registro válido encontrado no CSV");
+    return;
+  }
+
+  alert("CSV carregado com " + registros.length + " linhas válidas.\nAgora selecione o intervalo de datas e clique em Aplicar.");
 }
 
-function findNomePacienteCol(header) {
-  let i = header.findIndex(h => h === "nome");
-  if (i >= 0) return i;
-  i = header.findIndex(h => h === "nome_paciente");
-  if (i >= 0) return i;
-  return findCol(header, ["nome"]);
+function findCol(header, cand) {
+  for (let name of cand) {
+    let i = header.findIndex(h => h === name);
+    if (i >= 0) return i;
+  }
+  for (let name of cand) {
+    let i = header.findIndex(h => h.includes(name));
+    if (i >= 0) return i;
+  }
+  return -1;
 }
 
-function findNascCol(header) {
+function findColNasc(header) {
   let i = header.findIndex(h => h === "dt_nascimento");
-  if (i >= 0) return i;
-  i = header.findIndex(h => h === "data_nascimento");
+  i = i < 0 ? header.findIndex(h => h === "data_nascimento") : i;
   if (i >= 0) return i;
   i = header.findIndex(h => h.includes("nasc"));
   return i;
 }
 
-function findCol(header, cand) {
-  return header.findIndex(h => cand.some(name => h.includes(name)));
-}
-
 function normalizarNome(n) {
-  return (n || "").toLowerCase().replace(/(?:^|\s)\S/g, m => m.toUpperCase());
+  if (!n) return "";
+  let s = n.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  s = s.replace(/\s+/g, " ").trim();
+  s = s.replace(/\s+de\s+/g, " de ");
+  s = s.replace(/\s+da\s+/g, " da ");
+  s = s.replace(/\s+do\s+/g, " do ");
+  s = s.replace(/\s+dos\s+/g, " dos ");
+  s = s.replace(/\s+das\s+/g, " das ");
+  s = s.replace(/\s+e\s+/g, " e ");
+  s = s.replace(/\s+([a-z])/g, (_, c) => " " + c.toUpperCase());
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function parseDataAgendamento(s) {
-  if (!s) return null;
-  const partes = s.split(".");
-  if (partes.length !== 3) return null;
-  const [dd, mm, yyyy] = partes;
-  return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+function parseDataAgendamento(str) {
+  if (!str) return null;
+  const s = str.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [yyyy, mm, dd] = s.split("-");
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+    const [dd, mm, yyyy] = s.split("/");
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+  }
+  if (/^\d{2}\/\d{2}\/\d{2}$/.test(s)) {
+    const [dd, mm, yy] = s.split("/");
+    const yyyy = parseInt(yy, 10) >= 30 ? "19" + yy : "20" + yy;
+    return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+  }
+  return null;
 }
 
 function parseNascimento(nascStr) {
@@ -137,6 +166,15 @@ function calcularIdade(nascStr, hoje = new Date()) {
   const mDiff = hoje.getMonth() - month;
   if (mDiff < 0 || (mDiff === 0 && hoje.getDate() < day)) idade--;
   return idade;
+}
+
+function formatNascimentoCurto(nascStr) {
+  const dt = parseNascimento(nascStr);
+  if (!dt) return "";
+  const dd = String(dt.getDate()).padStart(2,"0");
+  const mm = String(dt.getMonth() + 1).padStart(2,"0");
+  const yy = String(dt.getFullYear() % 100).padStart(2,"0");
+  return dd + "/" + mm + "/" + yy;
 }
 
 btnAplicar.onclick = () => processar();
@@ -201,12 +239,40 @@ function processar() {
     };
   });
 
+  ajustarNomesDuplicados(agregadosOrig);
+
   filtrados = agregadosOrig.slice();
   detectarNovos();
   renderTabela();
   renderGrafico();
   atualizarArmazenamento();
   salvarHistorico();
+}
+
+function ajustarNomesDuplicados(lista) {
+  const grupos = {};
+  lista.forEach(r => {
+    const chave = (r.nomeBase || "").toLowerCase();
+    if (!chave) return;
+    if (!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(r);
+  });
+
+  Object.values(grupos).forEach(grupo => {
+    const cnsSet = new Set(grupo.map(x => x.cns).filter(Boolean));
+    if (cnsSet.size <= 1) return;
+
+    grupo.forEach(r => {
+      const nascCurta = formatNascimentoCurto(r.nasc);
+      if (!nascCurta) return;
+      const nomeAtual = String(r.nome || "");
+      const temAsterisco = nomeAtual.endsWith("*");
+      const base = temAsterisco ? nomeAtual.slice(0, -1).trim() : nomeAtual.trim();
+      if (!base.toLowerCase().includes(nascCurta.toLowerCase())) {
+        r.nome = base + " " + nascCurta + (temAsterisco ? "*" : "");
+      }
+    });
+  });
 }
 
 function renderTabela() {
@@ -243,19 +309,25 @@ campoPesquisa.oninput = () => {
   renderTabela();
 };
 
-const ths = document.querySelectorAll("#tabelaPacientes th");
-const numericCols = new Set(["idade", "exames", "presencas"]);
-
+const ths = document.querySelectorAll("#tabelaPacientes thead th");
 ths.forEach(th => {
   th.addEventListener("click", () => {
-    const col = th.dataset.col;
+    const col = th.getAttribute("data-col");
+    const asc = !th.dataset.asc || th.dataset.asc === "false";
+    th.dataset.asc = asc ? "true" : "false";
     filtrados.sort((a, b) => {
-      const va = a[col] ?? "";
-      const vb = b[col] ?? "";
-      if (numericCols.has(col)) {
-        return (Number(va) || 0) - (Number(vb) || 0);
+      let va = a[col];
+      let vb = b[col];
+      if (col === "presencas" || col === "exames" || col === "idade") {
+        const na = parseInt(va || "0", 10);
+        const nb = parseInt(vb || "0", 10);
+        return asc ? na - nb : nb - na;
       }
-      return String(va).localeCompare(String(vb), "pt-BR");
+      va = String(va || "");
+      vb = String(vb || "");
+      return asc
+        ? va.localeCompare(String(vb), "pt-BR")
+        : vb.localeCompare(String(va), "pt-BR");
     });
     renderTabela();
   });
@@ -294,17 +366,16 @@ function mostrarExames(cns) {
   closeBtn.type = "button";
   closeBtn.className = "modal-close";
   closeBtn.textContent = "×";
-  closeBtn.onclick = e => {
-    e.stopPropagation();
-    fecharModal();
+  closeBtn.onclick = () => {
+    modal.style.display = "none";
   };
 
   headerDiv.appendChild(infoDiv);
   headerDiv.appendChild(closeBtn);
   modalContent.appendChild(headerDiv);
 
-  const listDiv = document.createElement("div");
-  listDiv.className = "exam-list";
+  const listaDiv = document.createElement("div");
+  listaDiv.className = "exam-list";
 
   lista.forEach(x => {
     const row = document.createElement("div");
@@ -315,30 +386,29 @@ function mostrarExames(cns) {
 
     const desc = document.createElement("div");
     desc.className = "exam-desc";
-    desc.textContent = x.exame || "";
+    desc.textContent = x.exame;
+    info.appendChild(desc);
 
     const meta = document.createElement("div");
     meta.className = "exam-meta";
-    meta.textContent =
-      `Solicitação: ${x.solicitacao || "-"} • Código: ${x.codUnificado || "-"} • Data: ${x.data || ""}`;
-
-    info.appendChild(desc);
+    const dt = x.data || "";
+    meta.textContent = dt ? `Agendado para: ${dt}` : "Sem data de agendamento";
     info.appendChild(meta);
 
-    const actions = document.createElement("div");
-    actions.className = "exam-actions";
+    const chips = document.createElement("div");
+    chips.className = "exam-chips";
 
     const b1 = document.createElement("button");
     b1.type = "button";
     b1.className = "chip";
-    b1.textContent = "Solicitação";
-    b1.onclick = () => copiarCampo(x.solicitacao || "", "Solicitação copiada");
+    b1.textContent = "Nome";
+    b1.onclick = () => copiarCampo(paciente ? paciente.nome : x.nome || "", "Nome copiado");
 
     const b2 = document.createElement("button");
     b2.type = "button";
     b2.className = "chip";
-    b2.textContent = "Código";
-    b2.onclick = () => copiarCampo(x.codUnificado || "", "Código copiado");
+    b2.textContent = "CNS";
+    b2.onclick = () => copiarCampo(x.cns || "", "CNS copiado");
 
     const b3 = document.createElement("button");
     b3.type = "button";
@@ -346,63 +416,65 @@ function mostrarExames(cns) {
     b3.textContent = "Descrição";
     b3.onclick = () => copiarCampo(x.exame || "", "Descrição copiada");
 
-    actions.appendChild(b1);
-    actions.appendChild(b2);
-    actions.appendChild(b3);
+    chips.appendChild(b1);
+    chips.appendChild(b2);
+    chips.appendChild(b3);
+    info.appendChild(chips);
+
+    const meta2 = document.createElement("div");
+    meta2.className = "exam-meta-secundaria";
+    meta2.textContent = x.solicitacao ? `Solicitação: ${x.solicitacao}` : "";
+    info.appendChild(meta2);
 
     row.appendChild(info);
-    row.appendChild(actions);
-    listDiv.appendChild(row);
+    listaDiv.appendChild(row);
   });
 
-  modalContent.appendChild(listDiv);
+  modalContent.appendChild(listaDiv);
   modal.style.display = "flex";
 }
 
-function copiarCampo(valor, msg) {
-  const v = (valor || "").toString().trim();
-  if (!v) {
-    alert("Dado vazio");
+function copiarCampo(txt, msgSucesso) {
+  if (!txt) {
+    alert("Nada para copiar");
     return;
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(v)
-      .then(() => alert(msg))
+    navigator.clipboard.writeText(txt)
+      .then(() => alert(msgSucesso))
       .catch(() => alert("Não foi possível copiar"));
   } else {
-    const ta = document.createElement("textarea");
-    ta.value = v;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand("copy"); } catch (_) {}
-    document.body.removeChild(ta);
-    alert(msg);
+    alert("Clipboard não suportado neste navegador");
   }
 }
 
-function fecharModal() {
-  modal.style.display = "none";
-  if (linhaSelecionada) {
-    linhaSelecionada.classList.remove("linha-selecionada");
-    linhaSelecionada = null;
+window.addEventListener("click", e => {
+  if (e.target === modal) {
+    modal.style.display = "none";
   }
-}
-
-modal.onclick = () => fecharModal();
-modalContent.addEventListener("click", e => e.stopPropagation());
+});
 
 function detectarNovos() {
-  // novos em relação ao intervalo anterior
   const atualSet = new Set(
     filtrados.map(x => x.cns).filter(Boolean)
   );
 
   novos = filtrados.filter(x => x.cns && !ultimoCnsIntervalo.has(x.cns));
-
   ultimoCnsIntervalo = atualSet;
 
   const div = document.getElementById("listaNovos");
-  if (div) div.innerHTML = novos.map(x => x.nome).join("<br>");
+  if (div) {
+    if (novos.length) {
+      div.innerHTML = novos.map(x => x.nome).join("<br>");
+    } else {
+      div.innerHTML = "Nenhum novo nome neste intervalo";
+    }
+  }
+
+  const spanTotal = document.getElementById("novosTotal");
+  if (spanTotal) {
+    spanTotal.innerText = `(${novos.length})`;
+  }
 }
 
 btnCopiarNovos.onclick = () => {
@@ -440,20 +512,24 @@ function salvarHistorico() {
   } catch (_) {
     hist = [];
   }
-  const totalPacientes = agregadosOrig.length;
-  const totalExames = agregadosOrig.reduce((s, x) => s + x.exames, 0);
-  const reg = {
-    inicio: ultimaDataInicio,
-    fim: ultimaDataFim,
-    totalPacientes,
-    totalExames,
-    ts: new Date().toISOString()
-  };
-  const jaExiste = hist.some(h => h.inicio === reg.inicio && h.fim === reg.fim);
-  if (!jaExiste) {
-    hist.push(reg);
-    if (hist.length > 50) hist = hist.slice(hist.length - 50);
-    localStorage.setItem(KEY_HISTORICO, JSON.stringify(hist));
+  hist.unshift({
+    dataInicio: ultimaDataInicio,
+    dataFim: ultimaDataFim,
+    qtdePacientes: filtrados.length,
+    qtdeNovos: novos.length,
+    criadoEm: new Date().toISOString()
+  });
+  hist = hist.slice(0, 50);
+  localStorage.setItem(KEY_HISTORICO, JSON.stringify(hist));
+  renderHistorico(hist);
+}
+
+function carregarHistorico() {
+  let hist;
+  try {
+    hist = JSON.parse(localStorage.getItem(KEY_HISTORICO) || "[]");
+  } catch (_) {
+    hist = [];
   }
   renderHistorico(hist);
 }
@@ -470,23 +546,28 @@ function renderHistorico(hist) {
     div.innerText = "Nenhum intervalo salvo ainda";
     return;
   }
-  let html = "<ul>";
-  hist.slice().reverse().forEach(h => {
-    html += `<li>${h.inicio} até ${h.fim} - ${h.totalPacientes} pacientes, ${h.totalExames} exames</li>`;
-  });
-  html += "</ul>";
-  div.innerHTML = html;
-}
 
-(function initHistorico() {
-  let hist;
-  try {
-    hist = JSON.parse(localStorage.getItem(KEY_HISTORICO) || "[]");
-  } catch (_) {
-    hist = [];
-  }
-  renderHistorico(hist);
-})();
+  const ul = document.createElement("ul");
+  ul.className = "hist-list";
+
+  hist.forEach(item => {
+    const li = document.createElement("li");
+    li.className = "hist-item";
+    const titulo = document.createElement("div");
+    titulo.className = "hist-title";
+    titulo.textContent = `${item.dataInicio} até ${item.dataFim}`;
+    const detalhe = document.createElement("div");
+    detalhe.className = "hist-detail";
+    detalhe.textContent =
+      `Pacientes: ${item.qtdePacientes}  •  Novos: ${item.qtdeNovos}`;
+    li.appendChild(titulo);
+    li.appendChild(detalhe);
+    ul.appendChild(li);
+  });
+
+  div.innerHTML = "";
+  div.appendChild(ul);
+}
 
 function renderGrafico() {
   const canvas = document.getElementById("grafico");
@@ -504,6 +585,13 @@ function renderGrafico() {
   });
 
   const labels = Object.keys(dias);
+  if (!labels.length) return;
+  labels.sort((a, b) => {
+    const da = parseDataAgendamento(a) || new Date(a);
+    const db = parseDataAgendamento(b) || new Date(b);
+    return da - db;
+  });
+
   const valores = labels.map(d => dias[d]);
   const max = Math.max(...valores, 1);
   const barWidth = w / (labels.length || 1);
@@ -521,7 +609,10 @@ function renderGrafico() {
     ctx.fillRect(x - larguraBarra / 2, y, larguraBarra, barH);
 
     ctx.fillStyle = "#0f172a";
-    ctx.fillText(String(v), x, y - 4);        // número de exames
+    ctx.fillText(String(v), x, y - 4);        // quantidade no dia
     ctx.fillText(labels[i], x, h - 8);        // data
   });
 }
+
+carregarHistorico();
+atualizarArmazenamento();
