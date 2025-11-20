@@ -68,11 +68,18 @@ csvFile.addEventListener("change", () => {
 
 function parseCSV(txt) {
   const conteudo = txt.trim();
-  if (!conteudo) {
-    throw new Error("Arquivo vazio ou inválido");
-  }
+  if (!conteudo) throw new Error("Arquivo vazio ou inválido");
+
   const linhas = conteudo.split(/\r?\n/);
-  const rawHeader = linhas.shift().split(";");
+  if (!linhas.length) throw new Error("Arquivo vazio ou inválido");
+
+  // detecta separador dominante: prioriza ";" se houver empate
+  const primeira = linhas[0] || "";
+  const sep = ((primeira.match(/;/g) || []).length >= (primeira.match(/,/g) || []).length)
+    ? ";"
+    : ",";
+
+  const rawHeader = linhas.shift().split(sep);
   const header = rawHeader.map(h => h.trim().toLowerCase());
 
   const idx = {
@@ -94,18 +101,20 @@ function parseCSV(txt) {
     throw new Error(`CSV inválido. Colunas ausentes: ${faltantes.join(", ")}`);
   }
 
-  return linhas.map(l => {
-    const c = l.split(";");
-    return {
-      cns: c[idx.cns] || "",
-      nome: c[idx.nome] || "",
-      nasc: idx.nasc >= 0 ? (c[idx.nasc] || "") : "",
-      data: c[idx.data] || "",
-      exame: c[idx.exame] || "",
-      solicitacao: idx.solicitacao >= 0 ? (c[idx.solicitacao] || "") : "",
-      codUnificado: idx.codUnificado >= 0 ? (c[idx.codUnificado] || "") : ""
-    };
-  });
+  return linhas
+    .filter(l => l.trim())
+    .map(l => {
+      const c = l.split(sep);
+      return {
+        cns: c[idx.cns] || "",
+        nome: c[idx.nome] || "",
+        nasc: idx.nasc >= 0 ? (c[idx.nasc] || "") : "",
+        data: c[idx.data] || "",
+        exame: c[idx.exame] || "",
+        solicitacao: idx.solicitacao >= 0 ? (c[idx.solicitacao] || "") : "",
+        codUnificado: idx.codUnificado >= 0 ? (c[idx.codUnificado] || "") : ""
+      };
+    });
 }
 
 function findNomePacienteCol(header) {
@@ -135,10 +144,9 @@ function normalizarNome(n) {
 
 function parseDataAgendamento(s) {
   if (!s) return null;
-  const partes = s.split(".");
-  if (partes.length !== 3) return null;
-  const [dd, mm, yyyy] = partes;
-  return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+  const dt = parseNascimento(s); // aproveita todos os formatos já suportados
+  if (!dt) return null;
+  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
 }
 
 function parseNascimento(nascStr) {
