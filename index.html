@@ -96,7 +96,14 @@
 
   <!-- Card: Gráfico -->
   <section class="card">
-    <h2>Exames por dia de agendamento</h2>
+    <div class="card-header grafico-header">
+      <h2>Exames por dia de agendamento</h2>
+      <div class="toggle-group" role="group" aria-label="Visualização do gráfico">
+        <button type="button" class="toggle-button ativo" data-grafico-modo="todos">Tudo</button>
+        <button type="button" class="toggle-button" data-grafico-modo="exames">Exames</button>
+        <button type="button" class="toggle-button" data-grafico-modo="pacientes">Pacientes</button>
+      </div>
+    </div>
     <canvas id="grafico"></canvas>
   </section>
 
