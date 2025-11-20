@@ -13,6 +13,7 @@ let graficoBarras = [];
 let nomesPorDia = {};
 let agregadosPorCns = new Map();
 let bancoRegistros = [];
+let bancoHeaders = new Set();
 
 const csvFile = document.getElementById("csvFile");
 const campoPesquisa = document.getElementById("pesquisa");
@@ -42,7 +43,9 @@ csvFile.addEventListener("change", async () => {
 
   atualizarStatusPill(csvStatus, `Processando ${files.length} arquivo(s)...`, "info");
   try {
-    const novosRegistros = (await Promise.all(files.map(f => lerArquivoCSV(f)))).flat();
+    const resultados = await Promise.all(files.map(f => lerArquivoCSV(f)));
+    const novosRegistros = resultados.flatMap(r => r.rows);
+    resultados.forEach(r => registrarHeaders(r.header));
     mesclarNoBanco(novosRegistros);
     registros = bancoRegistros.slice();
 
@@ -101,11 +104,11 @@ function parseCSV(txt) {
     throw new Error(`CSV inválido. Colunas ausentes: ${faltantes.join(", ")}`);
   }
 
-  return linhas
+  const rows = linhas
     .filter(l => l.trim())
     .map(l => {
       const c = l.split(sep);
-      return {
+      const base = {
         cns: c[idx.cns] || "",
         nome: c[idx.nome] || "",
         nasc: idx.nasc >= 0 ? (c[idx.nasc] || "") : "",
@@ -114,7 +117,13 @@ function parseCSV(txt) {
         solicitacao: idx.solicitacao >= 0 ? (c[idx.solicitacao] || "") : "",
         codUnificado: idx.codUnificado >= 0 ? (c[idx.codUnificado] || "") : ""
       };
+      header.forEach((h, i) => {
+        base[h] = c[i] || "";
+      });
+      return base;
     });
+
+  return { header, rows };
 }
 
 function findNomePacienteCol(header) {
@@ -213,6 +222,27 @@ function atualizarStatusPill(el, texto, estado = "info") {
   el.dataset.status = estado;
 }
 
+function registrarHeaders(headerArr) {
+  if (!headerArr || !headerArr.length) return;
+  headerArr.forEach(h => {
+    if (h) bancoHeaders.add(h);
+  });
+  // garante cabeçalhos chaves esperados no app
+  ["cns", "nome", "nasc", "data", "exame", "solicitacao", "codUnificado"].forEach(h => bancoHeaders.add(h));
+}
+
+function salvarBancoLocal() {
+  const payload = {
+    headers: Array.from(bancoHeaders),
+    registros: bancoRegistros
+  };
+  try {
+    localStorage.setItem(KEY_BANCO, JSON.stringify(payload));
+  } catch (_) {
+    // ignora falhas de quota/privacidade
+  }
+}
+
 function lerArquivoCSV(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -238,6 +268,7 @@ function mesclarNoBanco(novosRegistros) {
   bancoRegistros.forEach(r => mapa.set(chaveRegistro(r), r));
   novosRegistros.forEach(r => {
     if (!r) return;
+    Object.keys(r).forEach(k => { if (k) bancoHeaders.add(k); });
     const k = chaveRegistro(r);
     if (!mapa.has(k)) mapa.set(k, r);
   });
@@ -253,12 +284,15 @@ function mesclarNoBanco(novosRegistros) {
   });
 
   bancoRegistros = todos;
-  localStorage.setItem(KEY_BANCO, JSON.stringify(bancoRegistros));
+  salvarBancoLocal();
 }
 
 function exportarBanco() {
   if (!bancoRegistros.length) return;
-  const header = ["cns", "nome", "nasc", "data", "exame", "solicitacao", "codUnificado"];
+  let header = Array.from(bancoHeaders);
+  if (!header.length && bancoRegistros.length) {
+    header = Object.keys(bancoRegistros[0]);
+  }
   const linhas = bancoRegistros.map(r => header.map(h => (r[h] || "").toString().replace(/;/g, ",")).join(";"));
   const csv = [header.join(";"), ...linhas].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -796,11 +830,19 @@ function renderHistorico(hist) {
   try {
     const salvo = localStorage.getItem(KEY_BANCO);
     if (salvo) {
-      bancoRegistros = JSON.parse(salvo) || [];
+      const parsed = JSON.parse(salvo);
+      if (Array.isArray(parsed)) {
+        bancoRegistros = parsed;
+        if (parsed.length) registrarHeaders(Object.keys(parsed[0]));
+      } else {
+        bancoRegistros = parsed.registros || [];
+        registrarHeaders(parsed.headers || []);
+      }
     }
   } catch (_) {
     bancoRegistros = [];
   }
+  if (!bancoHeaders.size) registrarHeaders(["cns", "nome", "nasc", "data", "exame", "solicitacao", "codUnificado"]);
   registros = bancoRegistros.slice();
 })();
 
