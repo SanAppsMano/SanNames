@@ -3,68 +3,112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SanApps — Analisador SUS</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>SanApps - Analisador SUS</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="app-header">SanApps — Analisador SUS</header>
+  <header class="topbar">
+    <h1>SanApps - Analisador SUS</h1>
+  </header>
 
-  <section class="card">
-    <h2>Carregar CSV</h2>
-    <input type="file" id="csvFile" accept=".csv">
-  </section>
-
-  <section class="card">
-    <h2>Intervalo de Datas</h2>
-    <label>De <input type="date" id="dataInicio"></label>
-    <label>Até <input type="date" id="dataFim"></label>
-    <button id="btnAplicar">Aplicar</button>
-  </section>
-
-  <section class="card">
-    <h2>Pacientes</h2>
-    <input type="text" id="pesquisa" placeholder="Pesquisar...">
+  <main class="layout">
+    <!-- Carregar CSV -->
     <section class="card">
-  <h2>Pacientes</h2>
-  <input type="text" id="pesquisa" placeholder="Pesquisar...">
-  <table id="tabelaPacientes">
-    <thead>
-      <tr>
-        <th data-col="cns">CNS</th>
-        <th data-col="nome">Nome</th>
-        <th data-col="nasc">Nascimento</th>
-        <th data-col="idade">Idade</th>
-        <th data-col="exames">Exames</th>
-        <th data-col="presencas">Presenças</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</section>
+      <h2>Carregar CSV</h2>
+      <div class="field-row">
+        <label class="file-label">
+          <span>Escolher arquivo</span>
+          <input id="csvFile" type="file" accept=".csv" />
+        </label>
+        <span class="hint">Use o arquivo exportado do sistema SUS</span>
+      </div>
+    </section>
 
-  <section class="card">
-    <h2>Gráfico de Exames por Dia</h2>
-    <canvas id="grafico"></canvas>
-  </section>
-
-  <section class="card">
-    <h2>Novos Registros</h2>
-    <button id="btnCopiarNovos">Copiar novos nomes</button>
-    <div id="listaNovos"></div>
-  </section>
-
-  <section class="card">
-    <h2>Armazenamento</h2>
-    <div id="armazenamentoInfo"></div>
-  </section>
-
+    <!-- Intervalo de datas -->
     <section class="card">
-  <h2>Histórico de intervalos</h2>
-  <div id="historico"></div>
-</section>
+      <h2>Intervalo de datas</h2>
+      <div class="field-row">
+        <div class="field-group">
+          <label for="dataInicio">De</label>
+          <input id="dataInicio" type="date" />
+        </div>
+        <div class="field-group">
+          <label for="dataFim">Até</label>
+          <input id="dataFim" type="date" />
+        </div>
+        <button id="btnAplicar" type="button" class="btn-primary">Aplicar</button>
+      </div>
+    </section>
 
+    <!-- Pacientes -->
+    <section class="card">
+      <h2>Pacientes</h2>
+      <div class="field-row">
+        <input
+          id="pesquisa"
+          type="text"
+          placeholder="Pesquisar por nome ou CNS"
+        />
+      </div>
+
+      <div class="table-wrapper">
+        <table id="tabelaPacientes">
+          <thead>
+            <tr>
+              <th data-col="cns">CNS</th>
+              <th data-col="nome">Nome</th>
+              <th data-col="nasc">Nasc.</th>
+              <th data-col="idade">Idade</th>
+              <th data-col="exames">Exames</th>
+              <th data-col="presencas">Dias</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Novos nomes -->
+    <section class="card">
+      <div class="card-header-row">
+        <h2>Novos nomes neste intervalo</h2>
+        <button id="btnCopiarNovos" type="button" class="btn-secondary">
+          Copiar novos nomes
+        </button>
+      </div>
+      <div id="listaNovos" class="lista-nomes">
+        Nenhum intervalo aplicado ainda
+      </div>
+    </section>
+
+    <!-- Gráfico -->
+    <section class="card">
+      <h2>Exames por dia de agendamento</h2>
+      <div class="grafico-container">
+        <canvas id="grafico"></canvas>
+      </div>
+    </section>
+
+    <!-- Histórico e armazenamento -->
+    <section class="card">
+      <div class="card-header-row">
+        <h2>Histórico de intervalos</h2>
+        <button id="btnLimparHistorico" type="button" class="btn-secondary">
+          Limpar histórico
+        </button>
+      </div>
+      <div id="historico" class="historico-list">
+        Nenhum intervalo salvo ainda
+      </div>
+      <div id="armazenamentoInfo" class="storage-info">
+        Uso estimado do localStorage: 0%
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal de exames -->
   <div id="modal" class="modal">
-    <div class="modal-content" id="modalContent"></div>
+    <div id="modalContent" class="modal-dialog"></div>
   </div>
 
   <script src="app.js"></script>
