@@ -12,6 +12,7 @@ let totalSolicitacoes = 0;
 let graficoBarras = [];
 let nomesPorDia = {};
 let agregadosPorCns = new Map();
+let bancoRegistros = [];
 
 const csvFile = document.getElementById("csvFile");
 const campoPesquisa = document.getElementById("pesquisa");
@@ -28,42 +29,41 @@ const intervaloStatus = document.getElementById("intervaloStatus");
 const graficoCanvas = document.getElementById("grafico");
 
 const KEY_HISTORICO = "historicoIntervalosSanNames";
+const KEY_BANCO = "SanApps_SUS";
 
-csvFile.addEventListener("change", () => {
-  const f = csvFile.files[0];
-  if (!f) {
-    registros = [];
+csvFile.addEventListener("change", async () => {
+  const files = Array.from(csvFile.files || []);
+  if (!files.length) {
+    registros = bancoRegistros.slice();
     atualizarStatusPill(csvStatus, "Nenhum arquivo selecionado", "muted");
+    renderGrafico();
     return;
   }
-  atualizarStatusPill(csvStatus, "Processando arquivo...", "info");
-  const r = new FileReader();
-  r.onload = e => {
-    try {
-      registros = parseCSV(e.target.result);
-      agregadosOrig = [];
-      filtrados = [];
-      registrosIntervalo = [];
-      ultimoCnsIntervalo = new Set();
-      novos = [];
-      const divNovos = document.getElementById("listaNovos");
-      if (divNovos) divNovos.innerHTML = "Nenhum intervalo aplicado ainda";
-      const spanNovos = document.getElementById("novosTotal");
-      if (spanNovos) spanNovos.innerText = "(0)";
-      if (tabelaBody) tabelaBody.innerHTML = "";
-      renderGrafico();
-      atualizarStatusPill(csvStatus, `Arquivo válido (${f.name})`, "ok");
-      tentarAplicarIntervalo();
-    } catch (err) {
-      registros = [];
-      atualizarStatusPill(csvStatus, err.message || "CSV inválido", "erro");
-    }
-  };
-  r.onerror = () => {
-    registros = [];
-    atualizarStatusPill(csvStatus, "Não foi possível ler o arquivo", "erro");
-  };
-  r.readAsText(f, "UTF-8");
+
+  atualizarStatusPill(csvStatus, `Processando ${files.length} arquivo(s)...`, "info");
+  try {
+    const novosRegistros = (await Promise.all(files.map(f => lerArquivoCSV(f)))).flat();
+    mesclarNoBanco(novosRegistros);
+    registros = bancoRegistros.slice();
+
+    agregadosOrig = [];
+    filtrados = [];
+    registrosIntervalo = [];
+    ultimoCnsIntervalo = new Set();
+    novos = [];
+    const divNovos = document.getElementById("listaNovos");
+    if (divNovos) divNovos.innerHTML = "Nenhum intervalo aplicado ainda";
+    const spanNovos = document.getElementById("novosTotal");
+    if (spanNovos) spanNovos.innerText = "(0)";
+    if (tabelaBody) tabelaBody.innerHTML = "";
+
+    renderGrafico();
+    atualizarStatusPill(csvStatus, `Banco atualizado: ${bancoRegistros.length} linhas`, "ok");
+    exportarBanco();
+    tentarAplicarIntervalo();
+  } catch (err) {
+    atualizarStatusPill(csvStatus, err.message || "Erro ao processar CSV", "erro");
+  }
 });
 
 function parseCSV(txt) {
@@ -211,6 +211,65 @@ function atualizarStatusPill(el, texto, estado = "info") {
   if (!el) return;
   el.textContent = texto;
   el.dataset.status = estado;
+}
+
+function lerArquivoCSV(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const dados = parseCSV(e.target.result);
+        resolve(dados);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
+    reader.readAsText(file, "UTF-8");
+  });
+}
+
+function chaveRegistro(r) {
+  return [r.cns || "", r.nome || "", r.nasc || "", r.data || "", r.exame || "", r.solicitacao || "", r.codUnificado || ""].join("|");
+}
+
+function mesclarNoBanco(novosRegistros) {
+  const mapa = new Map();
+  bancoRegistros.forEach(r => mapa.set(chaveRegistro(r), r));
+  novosRegistros.forEach(r => {
+    if (!r) return;
+    const k = chaveRegistro(r);
+    if (!mapa.has(k)) mapa.set(k, r);
+  });
+
+  const todos = Array.from(mapa.values());
+  todos.sort((a, b) => {
+    const da = parseDataAgendamento(a.data);
+    const db = parseDataAgendamento(b.data);
+    const va = da ? da.getTime() : Number.POSITIVE_INFINITY;
+    const vb = db ? db.getTime() : Number.POSITIVE_INFINITY;
+    if (va !== vb) return va - vb;
+    return (a.data || "").localeCompare(b.data || "");
+  });
+
+  bancoRegistros = todos;
+  localStorage.setItem(KEY_BANCO, JSON.stringify(bancoRegistros));
+}
+
+function exportarBanco() {
+  if (!bancoRegistros.length) return;
+  const header = ["cns", "nome", "nasc", "data", "exame", "solicitacao", "codUnificado"];
+  const linhas = bancoRegistros.map(r => header.map(h => (r[h] || "").toString().replace(/;/g, ",")).join(";"));
+  const csv = [header.join(";"), ...linhas].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "SanApps_SUS.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function obterNomeParaRegistro(reg) {
@@ -731,6 +790,18 @@ function renderHistorico(hist) {
     hist = [];
   }
   renderHistorico(hist);
+})();
+
+(function initBanco() {
+  try {
+    const salvo = localStorage.getItem(KEY_BANCO);
+    if (salvo) {
+      bancoRegistros = JSON.parse(salvo) || [];
+    }
+  } catch (_) {
+    bancoRegistros = [];
+  }
+  registros = bancoRegistros.slice();
 })();
 
 function renderGrafico() {
