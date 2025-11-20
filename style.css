@@ -2,6 +2,11 @@ body{margin:0;font-family:Inter,Arial;background:#f5f7fb;color:#1a1a1a;padding:2
 .app-header{font-size:26px;font-weight:700;color:#005dff;margin-bottom:20px;text-align:center}
 .card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 3px 8px rgba(0,0,0,.08);margin-bottom:20px}
 .card h2{margin-top:0;color:#003e9b;font-size:18px;font-weight:600}
+.card-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.toggle-group{display:flex;gap:6px;background:#e8f0ff;padding:4px;border-radius:999px}
+.toggle-button{background:transparent;color:#003e9b;font-weight:600;padding:6px 14px;border-radius:999px;border:none;cursor:pointer;font-size:13px;transition:.2s}
+.toggle-button:hover{background:rgba(0,93,255,.12)}
+.toggle-button.ativo{background:#005dff;color:#fff;box-shadow:0 4px 10px rgba(0,93,255,.3)}
 input[type="file"],input[type="date"],input[type="text"]{padding:8px 10px;border:1px solid #c8d4e6;border-radius:8px;font-size:14px;margin:6px 0}
 button{padding:8px 14px;border-radius:8px;border:none;background:#005dff;color:white;font-weight:600;cursor:pointer;transition:.2s}
 button:hover{background:#0046c9}
