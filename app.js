@@ -15,27 +15,39 @@ const modal = document.getElementById("modal");
 const modalContent = document.getElementById("modalContent");
 const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 
+// chave de storage para novos nomes e histórico
+const KEY_ULTIMA_LISTA = "ultimaLista";
+const KEY_HISTORICO = "historicoIntervalosSanNames";
+
+// Quando trocar de CSV, zera a memória de "novos"
 csvFile.addEventListener("change", () => {
   const f = csvFile.files[0];
   if (!f) return;
+
   const r = new FileReader();
   r.onload = e => {
     registros = parseCSV(e.target.result);
+    // reset de novos nomes para este arquivo
+    localStorage.removeItem(KEY_ULTIMA_LISTA);
+    const divNovos = document.getElementById("listaNovos");
+    if (divNovos) divNovos.innerHTML = "";
     alert("CSV carregado");
   };
   r.readAsText(f, "UTF-8");
 });
 
+// -------- PARSE DO CSV --------
 function parseCSV(txt) {
   const linhas = txt.trim().split(/\r?\n/);
   if (!linhas.length) return [];
+
   const rawHeader = linhas.shift().split(";");
   const header = rawHeader.map(h => h.trim().toLowerCase());
 
   const idx = {
     cns: findCol(header, ["cns"]),
     nome: findNomePacienteCol(header),
-    nasc: findCol(header, ["dt_nascimento", "data_nascimento"]),
+    nasc: findNascCol(header),
     data: findCol(header, ["data_agendamento", "dt_agendamento", "agendamento"]),
     exame: findCol(header, ["descricao_procedimento", "procedimento"]),
     solicitacao: findCol(header, ["numero_solicitacao", "solicitacao"]),
@@ -47,7 +59,7 @@ function parseCSV(txt) {
     return {
       cns: c[idx.cns] || "",
       nome: c[idx.nome] || "",
-      nasc: c[idx.nasc] || "",
+      nasc: idx.nasc >= 0 ? (c[idx.nasc] || "") : "",
       data: c[idx.data] || "",
       exame: c[idx.exame] || "",
       solicitacao: idx.solicitacao >= 0 ? (c[idx.solicitacao] || "") : "",
@@ -56,22 +68,36 @@ function parseCSV(txt) {
   });
 }
 
+// nome do paciente: prioriza "nome" exato
 function findNomePacienteCol(header) {
   let i = header.findIndex(h => h === "nome");
   if (i >= 0) return i;
   i = header.findIndex(h => h === "nome_paciente");
   if (i >= 0) return i;
+  // fallback (evitar profissional_executante, mas último recurso)
   return findCol(header, ["nome"]);
+}
+
+// nascimento: qualquer coluna que pareça data de nascimento, evitando profissional
+function findNascCol(header) {
+  let i = header.findIndex(h => h === "dt_nascimento");
+  if (i >= 0) return i;
+  i = header.findIndex(h => h === "data_nascimento");
+  if (i >= 0) return i;
+  i = header.findIndex(h => h.includes("nasc"));
+  return i; // pode ser -1, tratamos depois
 }
 
 function findCol(header, cand) {
   return header.findIndex(h => cand.some(name => h.includes(name)));
 }
 
+// -------- NORMALIZAÇÕES --------
 function normalizarNome(n) {
   return (n || "").toLowerCase().replace(/(?:^|\s)\S/g, m => m.toUpperCase());
 }
 
+// data_agendamento vem como dd.mm.aaaa (SISREG)
 function parseDataAgendamento(s) {
   if (!s) return null;
   const partes = s.split(".");
@@ -80,26 +106,59 @@ function parseDataAgendamento(s) {
   return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
 }
 
-function calcularIdade(nascStr, hoje = new Date()) {
+// parse flexível de nascimento (vários formatos)
+function parseNascimento(nascStr) {
   if (!nascStr) return null;
-  const partes = nascStr.split("/");
-  if (partes.length !== 3) return null;
-  let [dd, mm, aa] = partes;
-  let year = parseInt(aa, 10);
+  const s = nascStr.trim();
+  let d, m, y;
+
+  // dd/mm/aa ou dd/mm/aaaa
+  if (/^\d{2}\/\d{2}\/\d{2,4}$/.test(s)) {
+    [d, m, y] = s.split("/");
+  }
+  // dd-mm-aaaa
+  else if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+    [d, m, y] = s.split("-");
+  }
+  // dd.mm.aaaa
+  else if (/^\d{2}\.\d{2}\.\d{4}$/.test(s)) {
+    [d, m, y] = s.split(".");
+  }
+  // aaaa-mm-dd
+  else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    [y, m, d] = s.split("-");
+  } else {
+    return null;
+  }
+
+  let year = parseInt(y, 10);
   if (isNaN(year)) return null;
-  if (year < 100) {
+
+  if (y.length === 2) {
     year = year >= 30 ? 1900 + year : 2000 + year;
   }
-  const month = parseInt(mm, 10) - 1;
-  const day = parseInt(dd, 10);
-  const d = new Date(year, month, day);
-  if (isNaN(d.getTime())) return null;
+
+  const month = parseInt(m, 10) - 1;
+  const day = parseInt(d, 10);
+  const dt = new Date(year, month, day);
+  if (isNaN(dt.getTime())) return null;
+  return dt;
+}
+
+function calcularIdade(nascStr, hoje = new Date()) {
+  const dt = parseNascimento(nascStr);
+  if (!dt) return null;
+  const year = dt.getFullYear();
+  const month = dt.getMonth();
+  const day = dt.getDate();
+
   let idade = hoje.getFullYear() - year;
   const mDiff = hoje.getMonth() - month;
   if (mDiff < 0 || (mDiff === 0 && hoje.getDate() < day)) idade--;
   return idade;
 }
 
+// -------- PROCESSAMENTO PRINCIPAL --------
 btnAplicar.onclick = () => processar();
 
 function processar() {
@@ -113,6 +172,7 @@ function processar() {
     alert("Selecione o intervalo de datas");
     return;
   }
+
   ultimaDataInicio = iniStr;
   ultimaDataFim = fimStr;
 
@@ -168,6 +228,7 @@ function processar() {
   salvarHistorico();
 }
 
+// -------- TABELA / BUSCA / ORDEM --------
 function renderTabela() {
   tabelaBody.innerHTML = "";
   filtrados.forEach(r => {
@@ -179,12 +240,14 @@ function renderTabela() {
       `<td>${r.idade}</td>` +
       `<td>${r.exames}</td>` +
       `<td>${r.presencas}</td>`;
+
     tr.onclick = () => {
       if (linhaSelecionada) linhaSelecionada.classList.remove("linha-selecionada");
       linhaSelecionada = tr;
       tr.classList.add("linha-selecionada");
       mostrarExames(r.cns);
     };
+
     tabelaBody.appendChild(tr);
   });
 }
@@ -220,6 +283,7 @@ ths.forEach(th => {
   });
 });
 
+// -------- MODAL DE EXAMES --------
 function mostrarExames(cns) {
   const lista = registrosIntervalo.length
     ? registrosIntervalo.filter(x => x.cns === cns)
@@ -355,16 +419,17 @@ modalContent.addEventListener("click", e => {
   e.stopPropagation();
 });
 
+// -------- NOVOS REGISTROS --------
 function detectarNovos() {
   let last = [];
   try {
-    last = JSON.parse(localStorage.getItem("ultimaLista") || "[]");
+    last = JSON.parse(localStorage.getItem(KEY_ULTIMA_LISTA) || "[]");
   } catch (_) {
     last = [];
   }
   const antigos = new Set(last.map(x => x.cns));
   novos = filtrados.filter(x => !antigos.has(x.cns));
-  localStorage.setItem("ultimaLista", JSON.stringify(filtrados));
+  localStorage.setItem(KEY_ULTIMA_LISTA, JSON.stringify(filtrados));
   const div = document.getElementById("listaNovos");
   if (div) div.innerHTML = novos.map(x => x.nome).join("<br>");
 }
@@ -384,6 +449,7 @@ btnCopiarNovos.onclick = () => {
   }
 };
 
+// -------- ARMAZENAMENTO / HISTÓRICO / GRÁFICO --------
 function atualizarArmazenamento() {
   let usado = 0;
   try {
@@ -398,10 +464,9 @@ function atualizarArmazenamento() {
 }
 
 function salvarHistorico() {
-  const key = "historicoIntervalosSanNames";
   let hist;
   try {
-    hist = JSON.parse(localStorage.getItem(key) || "[]");
+    hist = JSON.parse(localStorage.getItem(KEY_HISTORICO) || "[]");
   } catch (_) {
     hist = [];
   }
@@ -418,7 +483,7 @@ function salvarHistorico() {
   if (!jaExiste) {
     hist.push(reg);
     if (hist.length > 50) hist = hist.slice(hist.length - 50);
-    localStorage.setItem(key, JSON.stringify(hist));
+    localStorage.setItem(KEY_HISTORICO, JSON.stringify(hist));
   }
   renderHistorico(hist);
 }
@@ -439,10 +504,9 @@ function renderHistorico(hist) {
 }
 
 (function initHistorico() {
-  const key = "historicoIntervalosSanNames";
   let hist;
   try {
-    hist = JSON.parse(localStorage.getItem(key) || "[]");
+    hist = JSON.parse(localStorage.getItem(KEY_HISTORICO) || "[]");
   } catch (_) {
     hist = [];
   }
