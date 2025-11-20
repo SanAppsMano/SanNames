@@ -1,527 +1,678 @@
-let registros = [];
-let agregadosOrig = [];
-let filtrados = [];
-let novos = [];
-let registrosIntervalo = [];
-let ultimaDataInicio = null;
-let ultimaDataFim = null;
-let linhaSelecionada = null;
-let ultimoCnsIntervalo = new Set(); // usado para comparar com o intervalo anterior
+let allRows = [];
+let basePatients = [];
+let currentPatients = [];
+let sortState = { col: null, dir: 1 };
+let fileKey = "";
+let seenKeys = new Set();
+let historyEntries = [];
+let lastNewNames = [];
+let selectedRowEl = null;
 
-const csvFile = document.getElementById("csvFile");
-const btnAplicar = document.getElementById("btnAplicar");
-const campoPesquisa = document.getElementById("pesquisa");
-const tabelaBody = document.querySelector("#tabelaPacientes tbody");
-const modal = document.getElementById("modal");
-const modalContent = document.getElementById("modalContent");
-const btnCopiarNovos = document.getElementById("btnCopiarNovos");
-const btnLimparHistorico = document.getElementById("btnLimparHistorico");
-
-const KEY_HISTORICO = "historicoIntervalosSanNames";
-
-csvFile.addEventListener("change", () => {
-  const f = csvFile.files[0];
-  if (!f) return;
-  const r = new FileReader();
-  r.onload = e => {
-    registros = parseCSV(e.target.result);
-    // ao trocar o CSV, zera o intervalo anterior e limpa novos
-    ultimoCnsIntervalo = new Set();
-    const divNovos = document.getElementById("listaNovos");
-    if (divNovos) divNovos.innerHTML = "";
-    alert("CSV carregado");
-  };
-  r.readAsText(f, "UTF-8");
-});
-
-function parseCSV(txt) {
-  const linhas = txt.trim().split(/\r?\n/);
-  if (!linhas.length) return [];
-  const rawHeader = linhas.shift().split(";");
-  const header = rawHeader.map(h => h.trim().toLowerCase());
-
-  const idx = {
-    cns: findCol(header, ["cns"]),
-    nome: findNomePacienteCol(header),
-    nasc: findNascCol(header),
-    data: findCol(header, ["data_agendamento", "dt_agendamento", "agendamento"]),
-    exame: findCol(header, ["descricao_procedimento", "procedimento"]),
-    solicitacao: findCol(header, ["numero_solicitacao", "solicitacao"]),
-    codUnificado: findCol(header, ["codigo_unificado", "cod_unificado"])
-  };
-
-  return linhas.map(l => {
-    const c = l.split(";");
-    return {
-      cns: c[idx.cns] || "",
-      nome: c[idx.nome] || "",
-      nasc: idx.nasc >= 0 ? (c[idx.nasc] || "") : "",
-      data: c[idx.data] || "",
-      exame: c[idx.exame] || "",
-      solicitacao: idx.solicitacao >= 0 ? (c[idx.solicitacao] || "") : "",
-      codUnificado: idx.codUnificado >= 0 ? (c[idx.codUnificado] || "") : ""
-    };
-  });
+function normHeader(h) {
+  return h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "");
 }
 
-function findNomePacienteCol(header) {
-  let i = header.findIndex(h => h === "nome");
-  if (i >= 0) return i;
-  i = header.findIndex(h => h === "nome_paciente");
-  if (i >= 0) return i;
-  return findCol(header, ["nome"]);
+function parseDateBR(str) {
+  if (!str) return null;
+  const m = str.match(/^(\d{2})[\/.\-](\d{2})[\/.\-](\d{2,4})$/);
+  if (!m) return null;
+  let d = parseInt(m[1], 10);
+  let mo = parseInt(m[2], 10) - 1;
+  let y = parseInt(m[3], 10);
+  if (y < 100) y += 2000;
+  return new Date(y, mo, d);
 }
 
-function findNascCol(header) {
-  let i = header.findIndex(h => h === "dt_nascimento");
-  if (i >= 0) return i;
-  i = header.findIndex(h => h === "data_nascimento");
-  if (i >= 0) return i;
-  i = header.findIndex(h => h.includes("nasc"));
-  return i;
+function formatDateBR(d) {
+  if (!d) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
 }
 
-function findCol(header, cand) {
-  return header.findIndex(h => cand.some(name => h.includes(name)));
+function formatInputDate(d) {
+  if (!d) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = d.getFullYear();
+  return `${yy}-${mm}-${dd}`;
 }
 
-function normalizarNome(n) {
-  return (n || "").toLowerCase().replace(/(?:^|\s)\S/g, m => m.toUpperCase());
+function formatShortNasc(nascDt, nascStr) {
+  let d = nascDt;
+  if (!d && nascStr) d = parseDateBR(nascStr);
+  if (!d) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
 }
 
-function parseDataAgendamento(s) {
-  if (!s) return null;
-  const partes = s.split(".");
-  if (partes.length !== 3) return null;
-  const [dd, mm, yyyy] = partes;
-  return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+function calcAge(nasc, ref) {
+  if (!nasc) return null;
+  const today = ref || new Date();
+  let age = today.getFullYear() - nasc.getFullYear();
+  const m = today.getMonth() - nasc.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < nasc.getDate())) age--;
+  return age;
 }
 
-function parseNascimento(nascStr) {
-  if (!nascStr) return null;
-  const s = nascStr.trim();
-  let d, m, y;
-
-  if (/^\d{2}\/\d{2}\/\d{2,4}$/.test(s)) {
-    [d, m, y] = s.split("/");
-  } else if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
-    [d, m, y] = s.split("-");
-  } else if (/^\d{2}\.\d{2}\.\d{4}$/.test(s)) {
-    [d, m, y] = s.split(".");
-  } else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    [y, m, d] = s.split("-");
-  } else {
-    return null;
-  }
-
-  let year = parseInt(y, 10);
-  if (isNaN(year)) return null;
-  if (y.length === 2) {
-    year = year >= 30 ? 1900 + year : 2000 + year;
-  }
-  const month = parseInt(m, 10) - 1;
-  const day = parseInt(d, 10);
-  const dt = new Date(year, month, day);
-  if (isNaN(dt.getTime())) return null;
-  return dt;
+function escapeHtml(str) {
+  return (str || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function calcularIdade(nascStr, hoje = new Date()) {
-  const dt = parseNascimento(nascStr);
-  if (!dt) return null;
-  const year = dt.getFullYear();
-  const month = dt.getMonth();
-  const day = dt.getDate();
-
-  let idade = hoje.getFullYear() - year;
-  const mDiff = hoje.getMonth() - month;
-  if (mDiff < 0 || (mDiff === 0 && hoje.getDate() < day)) idade--;
-  return idade;
+function setFileStatus(ok, msg) {
+  const el = document.getElementById("fileStatus");
+  if (!el) return;
+  el.style.display = "block";
+  el.textContent = msg;
+  el.className = ok ? "alert-success" : "alert-error";
 }
 
-btnAplicar.onclick = () => processar();
-if (btnLimparHistorico) btnLimparHistorico.onclick = () => limparHistorico();
+function getSeenKey() {
+  return fileKey ? "sannames_seen_" + fileKey : "";
+}
 
-function processar() {
-  if (!registros.length) {
-    alert("Carregue um CSV primeiro");
+function getHistoryKey() {
+  return fileKey ? "sannames_hist_" + fileKey : "";
+}
+
+function loadSeen() {
+  const k = getSeenKey();
+  if (!k) {
+    seenKeys = new Set();
     return;
   }
-  const iniStr = document.getElementById("dataInicio").value;
-  const fimStr = document.getElementById("dataFim").value;
-  if (!iniStr || !fimStr) {
-    alert("Selecione o intervalo de datas");
+  const raw = localStorage.getItem(k);
+  seenKeys = raw ? new Set(JSON.parse(raw)) : new Set();
+}
+
+function saveSeen() {
+  const k = getSeenKey();
+  if (!k) return;
+  localStorage.setItem(k, JSON.stringify(Array.from(seenKeys)));
+}
+
+function loadHistory() {
+  const k = getHistoryKey();
+  if (!k) {
+    historyEntries = [];
+    renderHistory();
     return;
   }
+  const raw = localStorage.getItem(k);
+  historyEntries = raw ? JSON.parse(raw) : [];
+  renderHistory();
+}
 
-  ultimaDataInicio = iniStr;
-  ultimaDataFim = fimStr;
+function saveHistory() {
+  const k = getHistoryKey();
+  if (!k) return;
+  localStorage.setItem(k, JSON.stringify(historyEntries));
+}
 
-  const d1 = new Date(iniStr + "T00:00:00");
-  const d2 = new Date(fimStr + "T23:59:59");
-
-  const mapa = {};
-  registrosIntervalo = [];
-
-  registros.forEach(r => {
-    const dt = parseDataAgendamento(r.data);
-    if (!dt) return;
-    if (dt >= d1 && dt <= d2) {
-      registrosIntervalo.push(r);
-      if (!mapa[r.cns]) {
-        mapa[r.cns] = {
-          cns: r.cns,
-          nome: r.nome,
-          nasc: r.nasc,
-          exames: 0,
-          dias: {}
-        };
-      }
-      mapa[r.cns].exames += 1;
-      mapa[r.cns].dias[r.data] = true;
+function updateStorageUsage() {
+  try {
+    let total = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      const val = localStorage.getItem(key);
+      total += (key.length + (val ? val.length : 0));
     }
-  });
-
-  const hoje = new Date();
-
-  agregadosOrig = Object.values(mapa).map(x => {
-    const idade = calcularIdade(x.nasc, hoje);
-    const idoso = idade !== null && idade >= 60;
-    const nomeBase = normalizarNome(x.nome);
-    return {
-      cns: x.cns,
-      nomeBase,
-      nome: nomeBase + (idoso ? "*" : ""),
-      nasc: x.nasc,
-      idade: idade !== null ? idade : "",
-      idoso,
-      exames: x.exames,
-      dias: x.dias,
-      presencas: Object.keys(x.dias).length
-    };
-  });
-
-  filtrados = agregadosOrig.slice();
-  detectarNovos();
-  renderTabela();
-  renderGrafico();
-  atualizarArmazenamento();
-  salvarHistorico();
+    const usedBytes = total * 2;
+    const quota = 5 * 1024 * 1024;
+    const pct = Math.min(100, (usedBytes / quota) * 100);
+    const el = document.getElementById("armazenamentoInfo");
+    if (el) el.textContent = `Uso estimado do localStorage: ${pct.toFixed(1)}%`;
+  } catch (_) {}
 }
 
-function renderTabela() {
-  tabelaBody.innerHTML = "";
-  filtrados.forEach(r => {
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td>${r.cns}</td>` +
-      `<td>${r.nome}</td>` +
-      `<td>${r.nasc}</td>` +
-      `<td>${r.idade}</td>` +
-      `<td>${r.exames}</td>` +
-      `<td>${r.presencas}</td>`;
-    tr.onclick = () => {
-      if (linhaSelecionada) linhaSelecionada.classList.remove("linha-selecionada");
-      linhaSelecionada = tr;
-      tr.classList.add("linha-selecionada");
-      mostrarExames(r.cns);
-    };
-    tabelaBody.appendChild(tr);
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+  if (!lines.length) return [];
+  const headerLine = lines[0];
+  const semi = (headerLine.match(/;/g) || []).length;
+  const comma = (headerLine.match(/,/g) || []).length;
+  const delim = semi >= comma ? ";" : ",";
+  const headers = headerLine.split(delim).map(h => h.trim());
+  const normHeaders = headers.map(normHeader);
+
+  const idx = { cns: -1, nome: -1, nasc: -1, idade: -1, ag: -1, qtd: -1, solicitacao: -1, codigo: -1, desc: -1 };
+
+  normHeaders.forEach((n, i) => {
+    if (n.includes("cns")) idx.cns = i;
+    else if (n === "nome" || n.includes("nomepaciente")) idx.nome = i;
+    else if (n.includes("nasc")) idx.nasc = i;
+    else if (n.includes("idade")) idx.idade = i;
+    else if (n.includes("agend") || n.includes("dataatendimento")) idx.ag = i;
+    else if (n.includes("qtdeexames") || n.includes("qtd") || n.includes("quantidadeexames")) idx.qtd = i;
+    else if (n.includes("solicitacao")) idx.solicitacao = i;
+    else if (n.includes("codigounificado") || n === "codunificado") idx.codigo = i;
+    else if (n.includes("descricao") || n.includes("procedimento")) idx.desc = i;
   });
-}
 
-campoPesquisa.oninput = () => {
-  const q = campoPesquisa.value.toLowerCase().trim();
-  if (!q) {
-    filtrados = agregadosOrig.slice();
-  } else {
-    filtrados = agregadosOrig.filter(x =>
-      x.nomeBase.toLowerCase().includes(q) ||
-      (x.cns || "").includes(q)
-    );
-  }
-  renderTabela();
-};
-
-const ths = document.querySelectorAll("#tabelaPacientes th");
-const numericCols = new Set(["idade", "exames", "presencas"]);
-
-ths.forEach(th => {
-  th.addEventListener("click", () => {
-    const col = th.dataset.col;
-    filtrados.sort((a, b) => {
-      const va = a[col] ?? "";
-      const vb = b[col] ?? "";
-      if (numericCols.has(col)) {
-        return (Number(va) || 0) - (Number(vb) || 0);
-      }
-      return String(va).localeCompare(String(vb), "pt-BR");
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(delim);
+    if (parts.length === 1 && parts[0].trim() === "") continue;
+    const get = index => (index >= 0 && index < parts.length ? parts[index].trim() : "");
+    const cns = get(idx.cns);
+    const nome = get(idx.nome);
+    if (!cns && !nome) continue;
+    const nascStr = get(idx.nasc);
+    const nascDt = parseDateBR(nascStr);
+    const idadeCsv = parseInt(get(idx.idade).replace(/\D/g, "")) || null;
+    const agStr = get(idx.ag);
+    const agDt = parseDateBR(agStr);
+    let qtd = parseInt(get(idx.qtd).replace(/\D/g, "")) || 1;
+    if (!Number.isFinite(qtd) || qtd <= 0) qtd = 1;
+    rows.push({
+      cns,
+      nome,
+      nascStr,
+      nascDt,
+      idadeCsv,
+      agStr,
+      agDt,
+      qtd,
+      solicitacao: get(idx.solicitacao),
+      codigo: get(idx.codigo),
+      descricao: get(idx.desc)
     });
-    renderTabela();
-  });
-});
-
-function mostrarExames(cns) {
-  const lista = registrosIntervalo.length
-    ? registrosIntervalo.filter(x => x.cns === cns)
-    : registros.filter(x => x.cns === cns);
-
-  const paciente = agregadosOrig.find(x => x.cns === cns);
-
-  modalContent.innerHTML = "";
-
-  const headerDiv = document.createElement("div");
-  headerDiv.className = "modal-header";
-
-  const infoDiv = document.createElement("div");
-  if (paciente) {
-    const h2 = document.createElement("h2");
-    h2.textContent = paciente.nome;
-    const p1 = document.createElement("p");
-    p1.textContent = `CNS: ${paciente.cns}`;
-    const p2 = document.createElement("p");
-    p2.textContent = `Nascimento: ${paciente.nasc}  •  Idade: ${paciente.idade || "?"}`;
-    infoDiv.appendChild(h2);
-    infoDiv.appendChild(p1);
-    infoDiv.appendChild(p2);
-  } else {
-    const h2 = document.createElement("h2");
-    h2.textContent = "Exames";
-    infoDiv.appendChild(h2);
   }
-
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "modal-close";
-  closeBtn.textContent = "×";
-  closeBtn.onclick = e => {
-    e.stopPropagation();
-    fecharModal();
-  };
-
-  headerDiv.appendChild(infoDiv);
-  headerDiv.appendChild(closeBtn);
-  modalContent.appendChild(headerDiv);
-
-  const listDiv = document.createElement("div");
-  listDiv.className = "exam-list";
-
-  lista.forEach(x => {
-    const row = document.createElement("div");
-    row.className = "exam-row";
-
-    const info = document.createElement("div");
-    info.className = "exam-info";
-
-    const desc = document.createElement("div");
-    desc.className = "exam-desc";
-    desc.textContent = x.exame || "";
-
-    const meta = document.createElement("div");
-    meta.className = "exam-meta";
-    meta.textContent =
-      `Solicitação: ${x.solicitacao || "-"} • Código: ${x.codUnificado || "-"} • Data: ${x.data || ""}`;
-
-    info.appendChild(desc);
-    info.appendChild(meta);
-
-    const actions = document.createElement("div");
-    actions.className = "exam-actions";
-
-    const b1 = document.createElement("button");
-    b1.type = "button";
-    b1.className = "chip";
-    b1.textContent = "Solicitação";
-    b1.onclick = () => copiarCampo(x.solicitacao || "", "Solicitação copiada");
-
-    const b2 = document.createElement("button");
-    b2.type = "button";
-    b2.className = "chip";
-    b2.textContent = "Código";
-    b2.onclick = () => copiarCampo(x.codUnificado || "", "Código copiado");
-
-    const b3 = document.createElement("button");
-    b3.type = "button";
-    b3.className = "chip";
-    b3.textContent = "Descrição";
-    b3.onclick = () => copiarCampo(x.exame || "", "Descrição copiada");
-
-    actions.appendChild(b1);
-    actions.appendChild(b2);
-    actions.appendChild(b3);
-
-    row.appendChild(info);
-    row.appendChild(actions);
-    listDiv.appendChild(row);
-  });
-
-  modalContent.appendChild(listDiv);
-  modal.style.display = "flex";
+  return rows;
 }
 
-function copiarCampo(valor, msg) {
-  const v = (valor || "").toString().trim();
-  if (!v) {
-    alert("Dado vazio");
+function computeMinMaxDates(rows) {
+  let min = null, max = null;
+  for (const r of rows) {
+    if (!r.agDt) continue;
+    if (!min || r.agDt < min) min = r.agDt;
+    if (!max || r.agDt > max) max = r.agDt;
+  }
+  return { min, max };
+}
+
+function disambiguateSameNames(patients) {
+  const groups = new Map();
+  for (const p of patients) {
+    const base = (p.baseName || p.displayName || "").replace(/\*+$/g, "").trim();
+    const key = base.toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+
+  for (const arr of groups.values()) {
+    if (arr.length <= 1) continue;
+    for (const p of arr) {
+      const short = formatShortNasc(p.nascDt, p.nascStr);
+      if (!short) continue;
+      const base = (p.baseName || p.displayName || "").replace(/\*+$/g, "").trim();
+      const hasStar = /\*$/.test(p.displayName || "");
+      p.displayName = `${base} ${short}${hasStar ? "*" : ""}`;
+    }
+  }
+}
+
+function buildPatientsForInterval(start, end) {
+  const rowsInInterval = allRows.filter(r => r.agDt && r.agDt >= start && r.agDt <= end);
+  const map = new Map();
+  for (const r of rowsInInterval) {
+    const key = r.cns || r.nome;
+    if (!key) continue;
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        cns: r.cns || "",
+        nomeOriginal: r.nome || "",
+        nascDt: r.nascDt || null,
+        nascStr: r.nascStr || "",
+        idade: null,
+        totalExames: 0,
+        diasSet: new Set(),
+        rows: []
+      };
+      map.set(key, g);
+    }
+    if (!g.nascDt && r.nascDt) {
+      g.nascDt = r.nascDt;
+      g.nascStr = r.nascStr;
+    }
+    if (g.idade == null && r.idadeCsv != null) g.idade = r.idadeCsv;
+    g.totalExames += r.qtd || 1;
+    if (r.agStr) g.diasSet.add(r.agStr);
+    g.rows.push(r);
+  }
+
+  const intervalNewKeys = new Set();
+  const newNamesSet = new Set();
+
+  const patients = [];
+  for (const g of map.values()) {
+    const refDate = end || new Date();
+    const ageCalc = calcAge(g.nascDt, refDate);
+    if (ageCalc != null) g.idade = ageCalc;
+    const rawName = (g.nomeOriginal || "").trim();
+    const hasStarOrig = /\*$/.test(rawName);
+    const baseName = hasStarOrig ? rawName.replace(/\*+$/g, "").trim() : rawName;
+    const elderly = g.idade != null && g.idade >= 60;
+    const finalStar = hasStarOrig || elderly;
+    let finalName = baseName + (finalStar ? "*" : "");
+
+    let isNovo = false;
+    for (const r of g.rows) {
+      if (!r.agDt) continue;
+      const dKey = r.agStr || formatDateBR(r.agDt);
+      const kk = `${g.cns}|${dKey}`;
+      if (!seenKeys.has(kk)) {
+        isNovo = true;
+        intervalNewKeys.add(kk);
+      }
+    }
+    if (isNovo) newNamesSet.add(finalName);
+
+    patients.push({
+      cns: g.cns,
+      nomeOriginal: g.nomeOriginal,
+      baseName,
+      displayName: finalName,
+      nascDt: g.nascDt,
+      nascStr: g.nascStr,
+      idade: g.idade,
+      totalExames: g.totalExames,
+      dias: g.diasSet.size || 1,
+      rows: g.rows
+    });
+  }
+
+  disambiguateSameNames(patients);
+
+  intervalNewKeys.forEach(k => seenKeys.add(k));
+  saveSeen();
+
+  renderNewNames(newNamesSet);
+  drawChart(rowsInInterval);
+
+  return patients;
+}
+
+function renderNewNames(setNames) {
+  const lista = document.getElementById("listaNovos");
+  const spanTotal = document.getElementById("novosTotal");
+  const arr = Array.from(setNames);
+  lastNewNames = arr;
+  if (spanTotal) spanTotal.textContent = `(${arr.length})`;
+  if (!arr.length) {
+    lista.textContent = "Nenhum novo nome neste intervalo";
     return;
   }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(v)
-      .then(() => alert(msg))
-      .catch(() => alert("Não foi possível copiar"));
-  } else {
-    const ta = document.createElement("textarea");
-    ta.value = v;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand("copy"); } catch (_) {}
-    document.body.removeChild(ta);
-    alert(msg);
-  }
+  arr.sort((a, b) => a.localeCompare(b, "pt-BR"));
+  lista.innerHTML = arr.map(escapeHtml).join("<br>");
 }
 
-function fecharModal() {
-  modal.style.display = "none";
-  if (linhaSelecionada) {
-    linhaSelecionada.classList.remove("linha-selecionada");
-    linhaSelecionada = null;
-  }
-}
-
-modal.onclick = () => fecharModal();
-modalContent.addEventListener("click", e => e.stopPropagation());
-
-function detectarNovos() {
-  // novos em relação ao intervalo anterior
-  const atualSet = new Set(
-    filtrados.map(x => x.cns).filter(Boolean)
-  );
-
-  novos = filtrados.filter(x => x.cns && !ultimoCnsIntervalo.has(x.cns));
-
-  ultimoCnsIntervalo = atualSet;
-
-  const div = document.getElementById("listaNovos");
-  if (div) div.innerHTML = novos.map(x => x.nome).join("<br>");
-}
-
-btnCopiarNovos.onclick = () => {
-  const txt = novos.map(x => x.nome).join("\n");
-  if (!txt) {
-    alert("Não há novos nomes");
-    return;
-  }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txt)
-      .then(() => alert("Novos nomes copiados"))
-      .catch(() => alert("Não foi possível copiar"));
-  } else {
-    alert("Clipboard não suportado neste navegador");
-  }
-};
-
-function atualizarArmazenamento() {
-  let usado = 0;
-  try {
-    usado = JSON.stringify(localStorage).length;
-  } catch (_) {
-    usado = 0;
-  }
-  const max = 5 * 1024 * 1024;
-  const pct = ((usado / max) * 100).toFixed(1);
-  const el = document.getElementById("armazenamentoInfo");
-  if (el) el.innerText = `Uso estimado do localStorage: ${pct}%`;
-}
-
-function salvarHistorico() {
-  let hist;
-  try {
-    hist = JSON.parse(localStorage.getItem(KEY_HISTORICO) || "[]");
-  } catch (_) {
-    hist = [];
-  }
-  const totalPacientes = agregadosOrig.length;
-  const totalExames = agregadosOrig.reduce((s, x) => s + x.exames, 0);
-  const reg = {
-    inicio: ultimaDataInicio,
-    fim: ultimaDataFim,
-    totalPacientes,
-    totalExames,
-    ts: new Date().toISOString()
-  };
-  const jaExiste = hist.some(h => h.inicio === reg.inicio && h.fim === reg.fim);
-  if (!jaExiste) {
-    hist.push(reg);
-    if (hist.length > 50) hist = hist.slice(hist.length - 50);
-    localStorage.setItem(KEY_HISTORICO, JSON.stringify(hist));
-  }
-  renderHistorico(hist);
-}
-
-function limparHistorico() {
-  localStorage.removeItem(KEY_HISTORICO);
-  renderHistorico([]);
-}
-
-function renderHistorico(hist) {
+function renderHistory() {
   const div = document.getElementById("historico");
-  if (!div) return;
-  if (!hist || !hist.length) {
-    div.innerText = "Nenhum intervalo salvo ainda";
+  if (!historyEntries.length) {
+    div.textContent = "Nenhum intervalo salvo ainda";
     return;
   }
   let html = "<ul>";
-  hist.slice().reverse().forEach(h => {
-    html += `<li>${h.inicio} até ${h.fim} - ${h.totalPacientes} pacientes, ${h.totalExames} exames</li>`;
+  historyEntries.forEach(h => {
+    html += `<li>${escapeHtml(h.label)}</li>`;
   });
   html += "</ul>";
   div.innerHTML = html;
 }
 
-(function initHistorico() {
-  let hist;
-  try {
-    hist = JSON.parse(localStorage.getItem(KEY_HISTORICO) || "[]");
-  } catch (_) {
-    hist = [];
-  }
-  renderHistorico(hist);
-})();
+function renderPatientsTable() {
+  const tbody = document.querySelector("#tabelaPacientes tbody");
+  tbody.innerHTML = "";
+  currentPatients.forEach((p, idx) => {
+    const tr = document.createElement("tr");
+    tr.dataset.index = String(idx);
+    const tdCns = document.createElement("td");
+    tdCns.textContent = p.cns;
+    const tdNome = document.createElement("td");
+    tdNome.textContent = p.displayName;
+    const tdNasc = document.createElement("td");
+    tdNasc.textContent = p.nascStr || "";
+    const tdIdade = document.createElement("td");
+    tdIdade.textContent = p.idade != null ? String(p.idade) : "";
+    const tdEx = document.createElement("td");
+    tdEx.textContent = String(p.totalExames);
+    tdEx.classList.add("cell-exames");
+    tdEx.style.color = "#005dff";
+    tdEx.style.fontWeight = "600";
+    tdEx.style.cursor = "pointer";
+    const tdDias = document.createElement("td");
+    tdDias.textContent = String(p.dias);
+    tr.appendChild(tdCns);
+    tr.appendChild(tdNome);
+    tr.appendChild(tdNasc);
+    tr.appendChild(tdIdade);
+    tr.appendChild(tdEx);
+    tr.appendChild(tdDias);
+    tbody.appendChild(tr);
+  });
+}
 
-function renderGrafico() {
+function applySearchAndSort() {
+  const term = document.getElementById("pesquisa").value.trim().toLowerCase();
+  let list = basePatients.filter(p => {
+    if (!term) return true;
+    return (p.cns && p.cns.toLowerCase().includes(term)) ||
+           (p.displayName && p.displayName.toLowerCase().includes(term));
+  });
+
+  if (sortState.col) {
+    const col = sortState.col;
+    const dir = sortState.dir;
+    list.sort((a, b) => {
+      let va = a[col];
+      let vb = b[col];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (col === "displayName" || col === "cns") {
+        return va.toString().localeCompare(vb.toString(), "pt-BR") * dir;
+      }
+      return (va > vb ? 1 : va < vb ? -1 : 0) * dir;
+    });
+  }
+
+  currentPatients = list;
+  renderPatientsTable();
+}
+
+function drawChart(rows) {
   const canvas = document.getElementById("grafico");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const w = canvas.width = canvas.clientWidth || 600;
-  const h = canvas.height = canvas.clientHeight || 300;
-  ctx.clearRect(0, 0, w, h);
-  if (!registrosIntervalo.length) return;
+  const width = canvas.width = canvas.clientWidth || 600;
+  const height = canvas.height = canvas.clientHeight || 320;
+  ctx.clearRect(0, 0, width, height);
 
-  const dias = {};
-  registrosIntervalo.forEach(r => {
-    const d = r.data || "";
-    dias[d] = (dias[d] || 0) + 1;
-  });
+  const map = new Map();
+  for (const r of rows) {
+    if (!r.agDt) continue;
+    const t = r.agDt.getTime();
+    let item = map.get(t);
+    if (!item) {
+      item = { time: t, date: r.agStr || formatDateBR(r.agDt), total: 0 };
+      map.set(t, item);
+    }
+    item.total += r.qtd || 1;
+  }
+  const days = Array.from(map.values()).sort((a, b) => a.time - b.time);
+  if (!days.length) {
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "14px Inter, Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("Nenhum exame no intervalo", width / 2, height / 2);
+    return;
+  }
 
-  const labels = Object.keys(dias);
-  const valores = labels.map(d => dias[d]);
-  const max = Math.max(...valores, 1);
-  const barWidth = w / (labels.length || 1);
+  const margin = { left: 40, right: 20, top: 20, bottom: 48 };
+  const chartW = width - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+  const maxVal = Math.max(...days.map(d => d.total));
+  const barW = Math.max(12, chartW / (days.length * 1.5));
+  const gap = days.length > 1 ? (chartW - barW * days.length) / (days.length - 1) : 0;
 
-  ctx.font = "10px Arial";
+  ctx.strokeStyle = "#cbd5f5";
+  ctx.beginPath();
+  ctx.moveTo(margin.left, margin.top);
+  ctx.lineTo(margin.left, margin.top + chartH);
+  ctx.lineTo(margin.left + chartW, margin.top + chartH);
+  ctx.stroke();
+
+  ctx.font = "11px Inter, Arial";
   ctx.textAlign = "center";
 
-  valores.forEach((v, i) => {
-    const x = i * barWidth + barWidth / 2;
-    const barH = (v / max) * (h - 40);
-    const y = h - 20 - barH;
-    const larguraBarra = barWidth * 0.6;
-
+  days.forEach((d, i) => {
+    const x = margin.left + i * (barW + gap);
+    const h = maxVal ? (d.total / maxVal) * (chartH - 20) : 0;
+    const y = margin.top + chartH - h;
     ctx.fillStyle = "#005dff";
-    ctx.fillRect(x - larguraBarra / 2, y, larguraBarra, barH);
+    ctx.fillRect(x, y, barW, h);
 
-    ctx.fillStyle = "#0f172a";
-    ctx.fillText(String(v), x, y - 4);        // número de exames
-    ctx.fillText(labels[i], x, h - 8);        // data
+    ctx.fillStyle = "#111827";
+    ctx.fillText(String(d.total), x + barW / 2, y - 4);
+
+    ctx.save();
+    ctx.translate(x + barW / 2, margin.top + chartH + 16);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillStyle = "#374151";
+    ctx.fillText(d.date, 0, 0);
+    ctx.restore();
   });
 }
+
+function openModalFor(index, rowEl) {
+  const modal = document.getElementById("modal");
+  const content = document.getElementById("modalContent");
+  const p = currentPatients[index];
+  if (!p) return;
+
+  if (selectedRowEl) selectedRowEl.classList.remove("linha-selecionada");
+  selectedRowEl = rowEl;
+  if (selectedRowEl) selectedRowEl.classList.add("linha-selecionada");
+
+  let html = `<div class="modal-header">
+      <div>
+        <h2>${escapeHtml(p.displayName)}</h2>
+        <p>CNS ${escapeHtml(p.cns || "")} • ${p.rows.length} linhas • ${p.totalExames} exames</p>
+      </div>
+      <button type="button" class="modal-close">&times;</button>
+    </div>
+    <div class="exam-list">`;
+
+  p.rows.forEach(r => {
+    html += `<div class="exam-row">
+      <div class="exam-info">
+        <div class="exam-desc">${escapeHtml(r.descricao || "Exame sem descrição")}</div>
+        <div class="exam-meta">
+          Solicitação: ${escapeHtml(r.solicitacao || "-")} • Código: ${escapeHtml(r.codigo || "-")} • Agendamento: ${escapeHtml(r.agStr || "")}
+        </div>
+      </div>
+      <div class="exam-actions">
+        <button class="chip" data-copy="${escapeHtml(r.solicitacao || "")}">Copiar solicitação</button>
+        <button class="chip" data-copy="${escapeHtml(r.codigo || "")}">Copiar código</button>
+        <button class="chip" data-copy="${escapeHtml(r.descricao || "")}">Copiar descrição</button>
+      </div>
+    </div>`;
+  });
+
+  html += "</div>";
+  content.innerHTML = html;
+  modal.style.display = "flex";
+}
+
+function closeModal() {
+  const modal = document.getElementById("modal");
+  modal.style.display = "none";
+  if (selectedRowEl) selectedRowEl.classList.remove("linha-selecionada");
+  selectedRowEl = null;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setFileStatus(false, "Nenhum arquivo carregado ainda");
+  updateStorageUsage();
+
+  const fileInput = document.getElementById("csvFile");
+  const btnAplicar = document.getElementById("btnAplicar");
+  const searchInput = document.getElementById("pesquisa");
+  const ths = document.querySelectorAll("#tabelaPacientes th");
+  const tbody = document.querySelector("#tabelaPacientes tbody");
+  const modal = document.getElementById("modal");
+  const modalContent = document.getElementById("modalContent");
+  const btnCopiarNovos = document.getElementById("btnCopiarNovos");
+  const btnLimparHistorico = document.getElementById("btnLimparHistorico");
+
+  fileInput.addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) {
+      allRows = [];
+      basePatients = [];
+      currentPatients = [];
+      renderPatientsTable();
+      setFileStatus(false, "Nenhum arquivo carregado ainda");
+      return;
+    }
+    fileKey = file.name || "arquivo";
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        allRows = parseCSV(ev.target.result);
+        if (!allRows.length) {
+          setFileStatus(false, "Não foi possível ler linhas válidas do CSV.");
+          return;
+        }
+        const { min, max } = computeMinMaxDates(allRows);
+        const di = document.getElementById("dataInicio");
+        const df = document.getElementById("dataFim");
+        if (min && di.value === "") di.value = formatInputDate(min);
+        if (max && df.value === "") df.value = formatInputDate(max);
+        setFileStatus(true, `Arquivo carregado com ${allRows.length} linhas.`);
+        loadSeen();
+        loadHistory();
+        updateStorageUsage();
+      } catch (err) {
+        console.error(err);
+        setFileStatus(false, "Erro ao processar o CSV.");
+      }
+    };
+    reader.readAsText(file, "utf-8");
+  });
+
+  btnAplicar.addEventListener("click", () => {
+    if (!allRows.length) {
+      setFileStatus(false, "Carregue o arquivo CSV antes de aplicar o intervalo.");
+      return;
+    }
+    const di = document.getElementById("dataInicio").value;
+    const df = document.getElementById("dataFim").value;
+    let start = di ? new Date(di + "T00:00:00") : null;
+    let end = df ? new Date(df + "T23:59:59") : null;
+    const { min, max } = computeMinMaxDates(allRows);
+    if (!start) start = min || new Date();
+    if (!end) end = max || new Date();
+
+    basePatients = buildPatientsForInterval(start, end);
+    sortState = { col: null, dir: 1 };
+    applySearchAndSort();
+
+    const totalExames = allRows
+      .filter(r => r.agDt && r.agDt >= start && r.agDt <= end)
+      .reduce((s, r) => s + (r.qtd || 1), 0);
+
+    const startStr = formatDateBR(start);
+    const endStr = formatDateBR(end);
+    historyEntries.push({
+      start: startStr,
+      end: endStr,
+      label: `${startStr} até ${endStr} — ${basePatients.length} pacientes únicos • ${totalExames} exames`
+    });
+    saveHistory();
+    renderHistory();
+    updateStorageUsage();
+  });
+
+  searchInput.addEventListener("input", () => {
+    applySearchAndSort();
+  });
+
+  ths.forEach(th => {
+    th.addEventListener("click", () => {
+      const colId = th.getAttribute("data-col");
+      const map = {
+        cns: "cns",
+        nome: "displayName",
+        nasc: "nascDt",
+        idade: "idade",
+        exames: "totalExames",
+        presencas: "dias"
+      };
+      const col = map[colId];
+      if (!col) return;
+      if (sortState.col === col) sortState.dir *= -1;
+      else {
+        sortState.col = col;
+        sortState.dir = 1;
+      }
+      applySearchAndSort();
+    });
+  });
+
+  tbody.addEventListener("click", e => {
+    const cell = e.target.closest("td");
+    if (!cell) return;
+    const row = cell.parentElement;
+    const idx = parseInt(row.dataset.index, 10);
+    if (Number.isNaN(idx)) return;
+    if (cell.classList.contains("cell-exames")) {
+      openModalFor(idx, row);
+    }
+  });
+
+  modal.addEventListener("click", e => {
+    if (e.target === modal) closeModal();
+  });
+
+  modalContent.addEventListener("click", e => {
+    if (e.target.classList.contains("modal-close")) {
+      closeModal();
+      return;
+    }
+    if (e.target.classList.contains("chip")) {
+      const txt = e.target.getAttribute("data-copy") || "";
+      if (!txt) {
+        alert("Nada para copiar.");
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(() => {
+          alert("Copiado para a área de transferência.");
+        }).catch(() => {
+          alert("Não foi possível copiar.");
+        });
+      } else {
+        alert("Seu navegador não suporta cópia automática.");
+      }
+    }
+  });
+
+  btnCopiarNovos.addEventListener("click", () => {
+    if (!lastNewNames.length) {
+      alert("Não há novos nomes neste intervalo.");
+      return;
+    }
+    const txt = lastNewNames.join("\n");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(() => {
+        alert("Novos nomes copiados para a área de transferência.");
+      }).catch(() => {
+        alert("Não foi possível copiar.");
+      });
+    } else {
+      alert("Seu navegador não suporta cópia automática.");
+    }
+  });
+
+  btnLimparHistorico.addEventListener("click", () => {
+    if (!fileKey) {
+      alert("Nenhum arquivo carregado.");
+      return;
+    }
+    if (!confirm("Limpar histórico e marcar todos os registros como novos novamente?")) return;
+    historyEntries = [];
+    renderHistory();
+    const sk = getSeenKey();
+    if (sk) localStorage.removeItem(sk);
+    seenKeys = new Set();
+    lastNewNames = [];
+    renderNewNames(new Set());
+    updateStorageUsage();
+  });
+});
