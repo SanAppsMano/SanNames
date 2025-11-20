@@ -14,13 +14,14 @@ const modal = document.getElementById("modal");
 const modalContent = document.getElementById("modalContent");
 const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 
+// leitura do CSV com mapeamento por nome de coluna (case insensitive)
 csvFile.addEventListener("change", () => {
   const f = csvFile.files[0];
   if (!f) return;
   const r = new FileReader();
   r.onload = e => {
     registros = parseCSV(e.target.result);
-    alert("CSV carregado!");
+    alert("CSV carregado");
   };
   r.readAsText(f, "UTF-8");
 });
@@ -28,14 +29,17 @@ csvFile.addEventListener("change", () => {
 function parseCSV(txt) {
   const linhas = txt.trim().split(/\r?\n/);
   if (!linhas.length) return [];
-  const header = linhas.shift().split(";");
+  const rawHeader = linhas.shift().split(";");
+  const header = rawHeader.map(h => h.trim().toLowerCase());
+
   const idx = {
-    cns: header.indexOf("cns"),
-    nome: header.indexOf("nome"),
-    nasc: header.indexOf("dt_nascimento"),
-    data: header.indexOf("data_agendamento"),
-    exame: header.indexOf("descricao_procedimento")
+    cns: findCol(header, ["cns"]),
+    nome: findCol(header, ["nome"]),
+    nasc: findCol(header, ["dt_nascimento", "data_nascimento"]),
+    data: findCol(header, ["data_agendamento", "dt_agendamento", "agendamento"]),
+    exame: findCol(header, ["descricao_procedimento", "procedimento"])
   };
+
   return linhas.map(l => {
     const c = l.split(";");
     return {
@@ -48,10 +52,15 @@ function parseCSV(txt) {
   });
 }
 
+function findCol(header, cand) {
+  return header.findIndex(h => cand.some(name => h.includes(name)));
+}
+
 function normalizarNome(n) {
   return (n || "").toLowerCase().replace(/(?:^|\s)\S/g, m => m.toUpperCase());
 }
 
+// data_agendamento no formato dd.mm.aaaa
 function parseDataAgendamento(s) {
   if (!s) return null;
   const partes = s.split(".");
@@ -60,21 +69,47 @@ function parseDataAgendamento(s) {
   return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
 }
 
+// nascimento no formato dd/mm/aaaa ou dd/mm/aa
+function calcularIdade(nascStr, hoje = new Date()) {
+  if (!nascStr) return null;
+  const partes = nascStr.split("/");
+  if (partes.length !== 3) return null;
+  let [dd, mm, aa] = partes;
+  let year = parseInt(aa, 10);
+  if (isNaN(year)) return null;
+  if (year < 100) {
+    year = year >= 30 ? 1900 + year : 2000 + year;
+  }
+  const month = parseInt(mm, 10) - 1;
+  const day = parseInt(dd, 10);
+  const d = new Date(year, month, day);
+  if (isNaN(d.getTime())) return null;
+
+  let idade = hoje.getFullYear() - year;
+  const mDiff = hoje.getMonth() - month;
+  if (mDiff < 0 || (mDiff === 0 && hoje.getDate() < day)) {
+    idade--;
+  }
+  return idade;
+}
+
 btnAplicar.onclick = () => processar();
 
 function processar() {
   if (!registros.length) {
-    alert("Carregue um CSV primeiro.");
+    alert("Carregue um CSV primeiro");
     return;
   }
   const iniStr = document.getElementById("dataInicio").value;
   const fimStr = document.getElementById("dataFim").value;
   if (!iniStr || !fimStr) {
-    alert("Selecione o intervalo de datas.");
+    alert("Selecione o intervalo de datas");
     return;
   }
+
   ultimaDataInicio = iniStr;
   ultimaDataFim = fimStr;
+
   const d1 = new Date(iniStr + "T00:00:00");
   const d2 = new Date(fimStr + "T23:59:59");
 
@@ -100,11 +135,19 @@ function processar() {
     }
   });
 
+  const hoje = new Date();
+
   agregadosOrig = Object.values(mapa).map(x => {
+    const idade = calcularIdade(x.nasc, hoje);
+    const idoso = idade !== null && idade >= 60;
+    const nomeBase = normalizarNome(x.nome);
     return {
       cns: x.cns,
-      nome: normalizarNome(x.nome),
+      nomeBase,
+      nome: nomeBase + (idoso ? "*" : ""),
       nasc: x.nasc,
+      idade: idade !== null ? idade : "",
+      idoso,
       exames: x.exames,
       dias: x.dias,
       presencas: Object.keys(x.dias).length
@@ -116,52 +159,80 @@ function processar() {
   renderTabela();
   renderGrafico();
   atualizarArmazenamento();
+  salvarHistorico();
 }
 
+// tabela
 function renderTabela() {
   tabelaBody.innerHTML = "";
   filtrados.forEach(r => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${r.cns}</td><td>${r.nome}</td><td>${r.nasc}</td><td>${r.exames}</td><td>${r.presencas}</td>`;
+    tr.innerHTML =
+      `<td>${r.cns}</td>` +
+      `<td>${r.nome}</td>` +
+      `<td>${r.nasc}</td>` +
+      `<td>${r.idade}</td>` +
+      `<td>${r.exames}</td>` +
+      `<td>${r.presencas}</td>`;
     tr.onclick = () => mostrarExames(r.cns);
     tabelaBody.appendChild(tr);
   });
 }
 
+// pesquisa
 campoPesquisa.oninput = () => {
   const q = campoPesquisa.value.toLowerCase().trim();
   if (!q) {
     filtrados = agregadosOrig.slice();
   } else {
     filtrados = agregadosOrig.filter(x =>
-      x.nome.toLowerCase().includes(q) || (x.cns || "").includes(q)
+      x.nomeBase.toLowerCase().includes(q) ||
+      (x.cns || "").includes(q)
     );
   }
   renderTabela();
 };
 
+// ordenação
 const ths = document.querySelectorAll("#tabelaPacientes th");
+const numericCols = new Set(["idade", "exames", "presencas"]);
+
 ths.forEach(th => {
   th.addEventListener("click", () => {
     const col = th.dataset.col;
     filtrados.sort((a, b) => {
-      const va = a[col] || "";
-      const vb = b[col] || "";
-      if (typeof va === "number" && typeof vb === "number") return va - vb;
+      const va = a[col] ?? "";
+      const vb = b[col] ?? "";
+      if (numericCols.has(col)) {
+        return (Number(va) || 0) - (Number(vb) || 0);
+      }
       return String(va).localeCompare(String(vb), "pt-BR");
     });
     renderTabela();
   });
 });
 
+// modal de exames
 function mostrarExames(cns) {
   const lista = registrosIntervalo.length
     ? registrosIntervalo.filter(x => x.cns === cns)
     : registros.filter(x => x.cns === cns);
-  let html = `<h2>Exames</h2>`;
+
+  const paciente = agregadosOrig.find(x => x.cns === cns);
+  let header = "";
+  if (paciente) {
+    header =
+      `<h2>${paciente.nome}</h2>` +
+      `<p>CNS: ${paciente.cns}</p>` +
+      `<p>Nascimento: ${paciente.nasc} | Idade: ${paciente.idade || "?"}</p>` +
+      `<hr>`;
+  }
+
+  let html = header + "<h3>Exames no intervalo</h3>";
   lista.forEach(x => {
-    html += `<p><b>${x.exame}</b> — ${x.data}</p>`;
+    html += `<p><b>${x.exame}</b> - ${x.data}</p>`;
   });
+
   modalContent.innerHTML = html;
   modal.style.display = "flex";
 }
@@ -170,6 +241,7 @@ modal.onclick = () => {
   modal.style.display = "none";
 };
 
+// novos registros
 function detectarNovos() {
   let last = [];
   try {
@@ -187,20 +259,19 @@ function detectarNovos() {
 btnCopiarNovos.onclick = () => {
   const txt = novos.map(x => x.nome).join("\n");
   if (!txt) {
-    alert("Não há novos nomes.");
+    alert("Não há novos nomes");
     return;
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txt).then(() => {
-      alert("Novos nomes copiados.");
-    }).catch(() => {
-      alert("Não foi possível copiar automaticamente.");
-    });
+    navigator.clipboard.writeText(txt)
+      .then(() => alert("Novos nomes copiados"))
+      .catch(() => alert("Não foi possível copiar"));
   } else {
-    alert("Clipboard não suportado neste navegador.");
+    alert("Clipboard não suportado neste navegador");
   }
 };
 
+// armazenamento
 function atualizarArmazenamento() {
   let usado = 0;
   try {
@@ -210,38 +281,59 @@ function atualizarArmazenamento() {
   }
   const max = 5 * 1024 * 1024;
   const pct = ((usado / max) * 100).toFixed(1);
-  document.getElementById("armazenamentoInfo").innerText = `Uso estimado do localStorage: ${pct}%`;
+  document.getElementById("armazenamentoInfo").innerText =
+    `Uso estimado do localStorage: ${pct}%`;
 }
 
-function renderGrafico() {
-  const canvas = document.getElementById("grafico");
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width = canvas.clientWidth || 600;
-  const h = canvas.height = canvas.clientHeight || 300;
-  ctx.clearRect(0, 0, w, h);
-
-  if (!registrosIntervalo.length) return;
-
-  const dias = {};
-  registrosIntervalo.forEach(r => {
-    const d = r.data || "";
-    dias[d] = (dias[d] || 0) + 1;
-  });
-
-  const labels = Object.keys(dias);
-  const valores = labels.map(d => dias[d]);
-  const max = Math.max(...valores, 1);
-  const barWidth = w / (labels.length || 1);
-
-  ctx.fillStyle = "#005dff";
-  ctx.font = "10px Arial";
-  ctx.textAlign = "center";
-
-  valores.forEach((v, i) => {
-    const x = i * barWidth + barWidth / 2;
-    const barH = (v / max) * (h - 40);
-    const y = h - 20 - barH;
-    ctx.fillRect(x - (barWidth * 0.5) * 0.6, y, barWidth * 0.6, barH);
-    ctx.fillText(labels[i], x, h - 8);
-  });
+// histórico de intervalos
+function salvarHistorico() {
+  const key = "historicoIntervalosSanNames";
+  let hist;
+  try {
+    hist = JSON.parse(localStorage.getItem(key) || "[]");
+  } catch (_) {
+    hist = [];
+  }
+  const totalPacientes = agregadosOrig.length;
+  const totalExames = agregadosOrig.reduce((s, x) => s + x.exames, 0);
+  const reg = {
+    inicio: ultimaDataInicio,
+    fim: ultimaDataFim,
+    totalPacientes,
+    totalExames,
+    ts: new Date().toISOString()
+  };
+  const jaExiste = hist.some(h => h.inicio === reg.inicio && h.fim === reg.fim);
+  if (!jaExiste) {
+    hist.push(reg);
+    if (hist.length > 50) hist = hist.slice(hist.length - 50);
+    localStorage.setItem(key, JSON.stringify(hist));
+  }
+  renderHistorico(hist);
 }
+
+function renderHistorico(hist) {
+  const div = document.getElementById("historico");
+  if (!hist || !hist.length) {
+    div.innerText = "Nenhum intervalo salvo ainda";
+    return;
+  }
+  let html = "<ul>";
+  hist.slice().reverse().forEach(h => {
+    html += `<li>${h.inicio} até ${h.fim} - ${h.totalPacientes} pacientes, ${h.totalExames} exames</li>`;
+  });
+  html += "</ul>";
+  div.innerHTML = html;
+}
+
+// carregar histórico na abertura
+(function initHistorico() {
+  const key = "historicoIntervalosSanNames";
+  let hist;
+  try {
+    hist = JSON.parse(localStorage.getItem(key) || "[]");
+  } catch (_) {
+    hist = [];
+  }
+  renderHistorico(hist);
+})();
