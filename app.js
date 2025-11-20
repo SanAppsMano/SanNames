@@ -109,7 +109,12 @@ function normalizarNome(n) {
 
 function parseDataAgendamento(str) {
   if (!str) return null;
-  const s = str.trim();
+  let s = String(str).trim();
+  if (!s) return null;
+
+  if (s.includes("T")) s = s.split("T")[0];
+  else if (s.includes(" ")) s = s.split(" ")[0];
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const [yyyy, mm, dd] = s.split("-");
     return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
