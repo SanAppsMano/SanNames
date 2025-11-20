@@ -16,19 +16,17 @@
   <!-- Card: Carregar CSV -->
   <section class="card">
     <h2>Carregar CSV</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <div class="upload-row">
       <label>
         <input id="csvFile" type="file" accept=".csv" />
       </label>
-      <span style="font-size:14px;color:#555;">
-        Use o arquivo exportado do sistema SUS
+      <span id="csvStatus" class="status-pill" data-status="muted">
+        Nenhum arquivo selecionado
       </span>
     </div>
-
-    <!-- Status do arquivo -->
-    <div id="fileStatus" class="alert-error" style="display:none;">
-      Nenhum arquivo carregado ainda
-    </div>
+    <span style="font-size:14px;color:#555;display:inline-block;margin-top:6px;">
+      Use o arquivo exportado do sistema SUS
+    </span>
   </section>
 
   <!-- Card: Intervalo de datas -->
@@ -43,9 +41,9 @@
         <label for="dataFim">Até</label><br/>
         <input id="dataFim" type="date" />
       </div>
-      <div style="margin-top:22px">
-        <button id="btnAplicar" type="button">Aplicar</button>
-      </div>
+    </div>
+    <div id="intervaloStatus" class="status-pill" data-status="muted" style="margin-top:10px;">
+      Selecione um intervalo válido para aplicar
     </div>
   </section>
 
