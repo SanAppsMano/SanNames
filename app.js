@@ -7,6 +7,7 @@ let ultimaDataInicio = null;
 let ultimaDataFim = null;
 let linhaSelecionada = null;
 let ultimoCnsIntervalo = new Set(); // usado para comparar com o intervalo anterior
+let graficoModo = "todos";
 
 const csvFile = document.getElementById("csvFile");
 const btnAplicar = document.getElementById("btnAplicar");
@@ -16,6 +17,7 @@ const modal = document.getElementById("modal");
 const modalContent = document.getElementById("modalContent");
 const btnCopiarNovos = document.getElementById("btnCopiarNovos");
 const btnLimparHistorico = document.getElementById("btnLimparHistorico");
+const graficoModoBotoes = document.querySelectorAll("[data-grafico-modo]");
 
 const KEY_HISTORICO = "historicoIntervalosSanNames";
 
@@ -169,6 +171,14 @@ function ajustarNomesDuplicados(lista) {
 
 btnAplicar.onclick = () => processar();
 if (btnLimparHistorico) btnLimparHistorico.onclick = () => limparHistorico();
+
+graficoModoBotoes.forEach(btn => {
+  btn.addEventListener("click", () => {
+    graficoModo = btn.dataset.graficoModo || "todos";
+    graficoModoBotoes.forEach(b => b.classList.toggle("ativo", b === btn));
+    renderGrafico();
+  });
+});
 
 function processar() {
   if (!registros.length) {
@@ -529,7 +539,7 @@ function renderGrafico() {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const w = canvas.width = canvas.clientWidth || 600;
-  const h = canvas.height = canvas.clientHeight || 300;
+  const h = canvas.height = canvas.clientHeight || 320;
   ctx.clearRect(0, 0, w, h);
   if (!registrosIntervalo.length) return;
 
@@ -544,32 +554,56 @@ function renderGrafico() {
   });
 
   const labels = Object.keys(dias);
-  const valores = labels.map(d => dias[d]);
-  const pacientesValores = labels.map(d => (pacientesPorDia[d] ? pacientesPorDia[d].size : 0));
-  const max = Math.max(...valores, 1);
-  const barWidth = w / (labels.length || 1);
+  if (!labels.length) return;
 
-  ctx.font = "10px Arial";
+  const examesValores = labels.map(d => dias[d]);
+  const pacientesValores = labels.map(d => (pacientesPorDia[d] ? pacientesPorDia[d].size : 0));
+
+  const datasets = [];
+  const modo = graficoModo || "todos";
+  if (modo === "todos" || modo === "exames") {
+    datasets.push({ valores: examesValores, cor: "#005dff", texto: "exames" });
+  }
+  if (modo === "todos" || modo === "pacientes") {
+    datasets.push({ valores: pacientesValores, cor: "#01b574", texto: "pacientes" });
+  }
+  if (!datasets.length) return;
+
+  const todosValores = datasets.reduce((acc, ds) => acc.concat(ds.valores), []);
+  const max = Math.max(...todosValores, 1);
+  const barWidth = w / Math.max(labels.length, 1);
+  const multiDataset = datasets.length > 1;
+  const offset = multiDataset ? barWidth * 0.3 : 0;
+  const larguraBarra = multiDataset ? barWidth * 0.25 : barWidth * 0.45;
+  const areaUtil = h - 70;
+
+  ctx.font = "11px Inter, Arial";
   ctx.textAlign = "center";
 
-  valores.forEach((v, i) => {
-    const x = i * barWidth + barWidth / 2;
-    const barH = (v / max) * (h - 40);
-    const y = h - 20 - barH;
-    const larguraBarra = barWidth * 0.6;
+  datasets.forEach((ds, dsIndex) => {
+    ds.valores.forEach((v, i) => {
+      const baseX = i * barWidth + barWidth / 2;
+      const x = multiDataset
+        ? baseX + (dsIndex - (datasets.length - 1) / 2) * offset
+        : baseX;
+      const barH = max ? (v / max) * areaUtil : 0;
+      const y = h - 30 - barH;
 
-    ctx.fillStyle = "#005dff";
-    ctx.fillRect(x - larguraBarra / 2, y, larguraBarra, barH);
+      ctx.fillStyle = ds.cor;
+      ctx.fillRect(x - larguraBarra / 2, y, larguraBarra, barH);
 
-    ctx.fillStyle = "#0f172a";
-    let labelY1 = y - 18;
-    let labelY2 = y - 6;
-    if (labelY1 < 12) {
-      labelY1 = 12;
-      labelY2 = 24;
-    }
-    ctx.fillText(`${v} exames`, x, labelY1);
-    ctx.fillText(`${pacientesValores[i]} pacientes`, x, labelY2);
-    ctx.fillText(labels[i], x, h - 8);        // data
+      ctx.fillStyle = "#0f172a";
+      ctx.textBaseline = "middle";
+      let textoY = y - 12;
+      if (textoY < 12) textoY = y + 12;
+      ctx.fillText(`${v} ${ds.texto}`, x, textoY);
+    });
+  });
+
+  ctx.fillStyle = "#475569";
+  ctx.textBaseline = "alphabetic";
+  labels.forEach((label, i) => {
+    const baseX = i * barWidth + barWidth / 2;
+    ctx.fillText(label, baseX, h - 8);
   });
 }
